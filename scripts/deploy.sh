@@ -7,7 +7,7 @@ set -euo pipefail
 
 # ---------- USER-TUNABLE PARAMETERS ----------
 RESOURCE_GROUP="${RESOURCE_GROUP:-fl-rg}"
-LOCATION="${LOCATION:-southeastasia}"
+LOCATION="${LOCATION:-centralindia}"
 AKS_NAME="${AKS_NAME:-fl-aks}"
 ACR_NAME="${ACR_NAME:-flacr$RANDOM}"          # must be globally unique
 NODE_COUNT="${NODE_COUNT:-3}"
