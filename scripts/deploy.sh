@@ -7,11 +7,11 @@ set -euo pipefail
 
 # ---------- USER-TUNABLE PARAMETERS ----------
 RESOURCE_GROUP="${RESOURCE_GROUP:-fl-rg}"
-LOCATION="${LOCATION:-centralindia}"
+LOCATION="${LOCATION:-southeastasia}"
 AKS_NAME="${AKS_NAME:-fl-aks}"
 ACR_NAME="${ACR_NAME:-flacr$RANDOM}"          # must be globally unique
 NODE_COUNT="${NODE_COUNT:-3}"
-NODE_SIZE="${NODE_SIZE:-Standard_B2ps_v2}"
+NODE_SIZE="${NODE_SIZE:-Standard_D4s_v5}"
 TAG="${TAG:-v1}"
 REPO_URL="${REPO_URL:-https://github.com/anhkiet-dao/Project_NT114.git}"
 WORKDIR="${WORKDIR:-$PWD/Project_NT114}"
@@ -63,8 +63,8 @@ kubectl apply -f /tmp/k8s-rendered/10-ipfs.yaml
 kubectl apply -f /tmp/k8s-rendered/20-blockchain.yaml
 
 echo "==> 7/8 Wait for blockchain RPC and run contract migration"
-kubectl -n blockchain rollout status statefulset/geth --timeout=5m
-kubectl -n blockchain wait --for=condition=complete job/contract-migrate --timeout=10m \
+kubectl -n blockchain rollout status statefulset/geth --timeout=15m
+kubectl -n blockchain wait --for=condition=complete job/contract-migrate --timeout=15m \
   || { echo "migration failed"; kubectl -n blockchain logs job/contract-migrate; exit 1; }
 
 echo "==> 8/8 Deploy aggregator + clients"

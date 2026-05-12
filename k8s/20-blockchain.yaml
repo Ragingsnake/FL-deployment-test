@@ -35,8 +35,10 @@ spec:
             - { name: data, mountPath: /chain/data }
           readinessProbe:
             tcpSocket: { port: 8545 }
-            initialDelaySeconds: 20
-            periodSeconds: 10
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20
+            timeoutSeconds: 5
       volumes:
         - name: data
           persistentVolumeClaim:
