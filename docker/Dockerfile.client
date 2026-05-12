@@ -1,0 +1,24 @@
+# FL Client container — runs one training participant
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    FL_SERVER_HOST=fl-server-svc.fl-clients.svc.cluster.local \
+    FL_SERVER_PORT=8080 \
+    IPFS_API=/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001 \
+    ETH_RPC=http://geth-svc.blockchain.svc.cluster.local:8545 \
+    SPLIT_TYPE=non_iid
+
+# CLIENT_ID is injected per pod via env
+CMD ["sh", "-c", "python fl_client.py ${CLIENT_ID} ${SPLIT_TYPE}"]

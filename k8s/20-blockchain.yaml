@@ -1,0 +1,113 @@
+# Ethereum PoA (Clique) — single sealer node
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: geth-data
+  namespace: blockchain
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 3Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: geth
+  namespace: blockchain
+spec:
+  serviceName: geth-svc
+  replicas: 1
+  selector:
+    matchLabels: { app: geth }
+  template:
+    metadata:
+      labels: { app: geth }
+    spec:
+      containers:
+        - name: geth
+          image: ${REGISTRY}/fl-blockchain:${TAG}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: rpc, containerPort: 8545 }
+            - { name: ws,  containerPort: 8546 }
+          volumeMounts:
+            - { name: data, mountPath: /chain/data }
+          readinessProbe:
+            tcpSocket: { port: 8545 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: geth-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: geth-svc
+  namespace: blockchain
+spec:
+  selector: { app: geth }
+  ports:
+    - { name: rpc, port: 8545, targetPort: 8545 }
+    - { name: ws,  port: 8546, targetPort: 8546 }
+---
+# One-shot Job that compiles & deploys the Solidity contracts via Truffle
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: contract-migrate
+  namespace: blockchain
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: truffle
+          image: ${REGISTRY}/fl-blockchain:${TAG}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Waiting for geth RPC..."
+              until curl -s -X POST -H "Content-Type: application/json" \
+                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                http://geth-svc:8545 | grep -q result; do sleep 3; done
+              cd /chain
+              truffle migrate --network kube --reset
+              ADDR=$(jq -r '.networks | to_entries[0].value.address' build/contracts/Reputation.json)
+              echo "Reputation deployed at $ADDR"
+              # Write address into a ConfigMap-style file the server can read
+              kubectl create configmap contract-address \
+                --from-literal=REPUTATION_ADDRESS=$ADDR \
+                -n aggregation --dry-run=client -o yaml | kubectl apply -f -
+          env:
+            - { name: ETH_RPC, value: "http://geth-svc:8545" }
+      serviceAccountName: migrator-sa
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: migrator-sa, namespace: blockchain }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: configmap-writer }
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create","get","update","patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: migrator-sa-bind }
+subjects:
+  - kind: ServiceAccount
+    name: migrator-sa
+    namespace: blockchain
+roleRef:
+  kind: ClusterRole
+  name: configmap-writer
+  apiGroup: rbac.authorization.k8s.io

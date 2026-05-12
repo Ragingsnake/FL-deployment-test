@@ -1,0 +1,25 @@
+# FL Server / Aggregator container
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the whole project (server-side modules + shared utils + compiled contracts)
+COPY . .
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    FL_SERVER_ADDRESS=0.0.0.0:8080 \
+    IPFS_API=/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001 \
+    ETH_RPC=http://geth-svc.blockchain.svc.cluster.local:8545 \
+    CONTRACT_ADDRESS_FILE=/app/build/contracts/Reputation.address
+
+EXPOSE 8080
+
+CMD ["python", "fl_server.py"]

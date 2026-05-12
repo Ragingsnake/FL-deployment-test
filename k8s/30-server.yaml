@@ -1,0 +1,68 @@
+# Aggregator (FL Server) pod — receives client updates, runs FedAdam aggregation
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: server-outputs
+  namespace: aggregation
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fl-server
+  namespace: aggregation
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: fl-server }
+  template:
+    metadata:
+      labels: { app: fl-server }
+    spec:
+      containers:
+        - name: server
+          image: ${REGISTRY}/fl-server:${TAG}
+          ports:
+            - { containerPort: 8080 }
+          env:
+            - { name: IPFS_API, value: "/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001" }
+            - { name: ETH_RPC,  value: "http://geth-svc.blockchain.svc.cluster.local:8545" }
+            - name: REPUTATION_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: contract-address
+                  key: REPUTATION_ADDRESS
+          volumeMounts:
+            - { name: outputs, mountPath: /app/picture }
+      volumes:
+        - name: outputs
+          persistentVolumeClaim:
+            claimName: server-outputs
+---
+# Headless-ish service exposed across namespaces for clients to connect
+apiVersion: v1
+kind: Service
+metadata:
+  name: fl-server-svc
+  namespace: aggregation
+spec:
+  selector: { app: fl-server }
+  ports:
+    - { name: flwr, port: 8080, targetPort: 8080 }
+---
+# Mirror service in fl-clients namespace via ExternalName so clients can use
+# the short DNS "fl-server-svc.fl-clients" form, matching architecture diagram.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fl-server-svc
+  namespace: fl-clients
+spec:
+  type: ExternalName
+  externalName: fl-server-svc.aggregation.svc.cluster.local
+  ports:
+    - { port: 8080 }

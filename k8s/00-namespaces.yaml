@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fl-clients
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ipfs
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blockchain
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aggregation

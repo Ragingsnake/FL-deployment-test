@@ -1,0 +1,90 @@
+<mxfile host="app.diagrams.net" modified="2026-05-12T00:00:00.000Z" agent="Claude" version="24.0.0">
+  <diagram name="AKS-FL-ZKP" id="aks-fl-arch">
+    <mxGraphModel dx="1422" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Cluster boundary -->
+        <mxCell id="cluster" value="Azure Kubernetes Cluster (AKS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="1320" height="820" as="geometry" />
+        </mxCell>
+
+        <!-- fl-clients namespace -->
+        <mxCell id="ns-clients" value="fl-clients namespace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="100" width="320" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="c1" value="Client 1 Pod&#10;Local Training&#10;ZKP Prover" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#36c;" vertex="1" parent="1">
+          <mxGeometry x="120" y="150" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="Client 2 Pod" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#36c;" vertex="1" parent="1">
+          <mxGeometry x="120" y="250" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" value="Client 3 Pod" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#36c;" vertex="1" parent="1">
+          <mxGeometry x="120" y="330" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" value="Client 4 Pod" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#36c;" vertex="1" parent="1">
+          <mxGeometry x="120" y="410" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c5" value="Client 5 Pod" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#36c;" vertex="1" parent="1">
+          <mxGeometry x="120" y="490" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ipfs namespace -->
+        <mxCell id="ns-ipfs" value="ipfs namespace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;dashed=1;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="100" width="340" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="ipfs" value="IPFS Node (single)&#10;Stores all client weight files&#10;Returns CID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b9e0a5;strokeColor=#2e7d32;" vertex="1" parent="1">
+          <mxGeometry x="540" y="160" width="260" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- blockchain namespace -->
+        <mxCell id="ns-bc" value="blockchain namespace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="340" width="340" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="geth" value="Ethereum PoA Node (Geth Clique)&#10;Smart Contract: Reputation.sol&#10;ZK Verifier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f4b6b3;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="540" y="400" width="260" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- aggregation namespace -->
+        <mxCell id="ns-agg" value="aggregation namespace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;dashed=1;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="340" width="380" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="agg" value="Aggregator Pod (FL Server)&#10;Fetch models from IPFS&#10;FedAdam aggregation&#10;Verify via blockchain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0bcd5;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="980" y="400" width="300" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" style="endArrow=classic;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="c1" target="ipfs">
+          <mxGeometry relative="1" as="geometry" />
+          <mxCell value="Model + ZKP Proof" style="text;html=1;" />
+        </mxCell>
+        <mxCell id="e1l" value="Model + ZKP Proof" style="text;html=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="380" y="170" width="120" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="endArrow=classic;html=1;exitX=1;exitY=0.5;entryX=0;entryY=1;" edge="1" parent="1" source="c3" target="ipfs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="endArrow=classic;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="c5" target="geth">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3l" value="CID + Proof Submission" style="text;html=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="380" y="460" width="140" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="endArrow=classic;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="geth" target="agg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4l" value="Verification + Reputation" style="text;html=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="810" y="440" width="160" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="endArrow=classic;html=1;exitX=0.5;exitY=0;entryX=1;entryY=0.5;" edge="1" parent="1" source="agg" target="ipfs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5l" value="Fetch Models" style="text;html=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="300" width="100" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

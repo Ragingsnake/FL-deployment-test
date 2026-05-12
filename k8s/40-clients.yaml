@@ -1,0 +1,43 @@
+# 5 FL Client pods (Client 1..5) as a StatefulSet to get stable ordinals -> CLIENT_ID
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fl-client
+  namespace: fl-clients
+spec:
+  serviceName: fl-client
+  replicas: 5
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app: fl-client }
+  template:
+    metadata:
+      labels: { app: fl-client }
+    spec:
+      containers:
+        - name: client
+          image: ${REGISTRY}/fl-client:${TAG}
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # CLIENT_ID derives from StatefulSet ordinal (pod name ends with -0..-4)
+            - name: CLIENT_ID_RAW
+              value: "$(POD_NAME)"
+            - { name: SPLIT_TYPE, value: "non_iid" }
+            - { name: FL_SERVER_HOST, value: "fl-server-svc.aggregation.svc.cluster.local" }
+            - { name: FL_SERVER_PORT, value: "8080" }
+            - { name: IPFS_API, value: "/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001" }
+            - { name: ETH_RPC, value: "http://geth-svc.blockchain.svc.cluster.local:8545" }
+            - name: REPUTATION_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: contract-address
+                  key: REPUTATION_ADDRESS
+                  optional: true
+          command: ["sh","-c"]
+          args:
+            - |
+              # Extract ordinal from pod name (e.g. fl-client-2 -> 2), then start
+              CLIENT_ID="${POD_NAME##*-}"
+              echo "Starting client $CLIENT_ID ($SPLIT_TYPE)"
+              python fl_client.py "$CLIENT_ID" "$SPLIT_TYPE"
