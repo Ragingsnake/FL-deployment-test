@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates jq && \
     curl -L https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-1.13.15-c5ba367e.tar.gz \
       | tar -xz --strip-components=1 -C /usr/local/bin geth-linux-amd64-1.13.15-c5ba367e/geth && \
+    curl -L https://dl.k8s.io/release/v1.34.6/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && \
+    chmod +x /usr/local/bin/kubectl && \
     npm install -g truffle@5.11.5 && \
     rm -rf /var/lib/apt/lists/*
 # Project files (contracts, migrations, truffle-config.js)
