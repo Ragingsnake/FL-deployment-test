@@ -49,9 +49,9 @@ bash "$SCRIPT_DIR/apply-fixes.sh" "$WORKDIR"
 
 echo "==> 5/8 Build & push images via ACR Tasks (no local docker required)"
 cd "$WORKDIR"
-az acr build -r "$ACR_NAME" -t "fl-server:$TAG"     -f deployment/docker/Dockerfile.server     .
-az acr build -r "$ACR_NAME" -t "fl-client:$TAG"     -f deployment/docker/Dockerfile.client     .
-az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerfile.blockchain .
+az acr build -r "$ACR_NAME" -t "fl-server:$TAG"     -f deployment/docker/Dockerfile.server     --platform linux/amd64 .
+az acr build -r "$ACR_NAME" -t "fl-client:$TAG"     -f deployment/docker/Dockerfile.client     --platform linux/amd64 .
+az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerfile.blockchain --platform linux/amd64 .
 
 echo "==> 6/8 Render manifests with REGISTRY/TAG and apply"
 mkdir -p /tmp/k8s-rendered
