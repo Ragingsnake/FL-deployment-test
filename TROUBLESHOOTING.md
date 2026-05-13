@@ -71,7 +71,7 @@ kubectl -n ipfs exec -it ipfs-0 -- ipfs repo stat
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| **`exec format error` in logs** | **Image built for wrong CPU architecture (ARM64 vs AMD64)** | **Run: `bash deployment/scripts/rebuild-blockchain.sh`** |
+| **`exec format error` in logs** | **Usually a stale or wrong-arch blockchain image; the repo reuses the `v1` tag, so AKS may keep an old cached image** | **Rebuild the image, then restart the pod; with the manifest fix, the pod will always pull the latest tag** |
 | Clients stuck in `Pending` | AKS out of CPU | scale node pool: `az aks scale -g fl-rg -n fl-aks -c 5` |
 | `contract-migrate` Job fails | Geth not finished sealing genesis | re-run: `kubectl -n blockchain delete job contract-migrate && kubectl apply -f /tmp/k8s-rendered/20-blockchain.yaml` |
 | Client crashloop with `Connection refused` to server | `fl-server` not ready yet; clients retry. Wait for the rollout to finish before applying `40-clients.yaml` (the deploy script already orders this). |
