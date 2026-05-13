@@ -20,7 +20,7 @@ cd "$WORKDIR"
 az acr build \
   -r "$ACR_NAME" \
   -t "fl-blockchain:$TAG" \
-  -f deployment/docker/Dockerfile.blockchain \
+  -f FL-deployment-test/docker/Dockerfile.blockchain \
   --platform linux/amd64 \
   .
 

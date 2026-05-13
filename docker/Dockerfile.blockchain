@@ -5,8 +5,8 @@ WORKDIR /chain
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates jq && \
-    curl -L https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-1.13.15-c5ba367e.tar.gz \
-      | tar -xz --strip-components=1 -C /usr/local/bin geth-linux-amd64-1.13.15-c5ba367e/geth && \
+    curl -L https://gethstore.blob.core.windows.net/builds/geth-linux-arm64-1.13.15-c5ba367e.tar.gz \
+      | tar -xz --strip-components=1 -C /usr/local/bin geth-linux-arm64-1.13.15-c5ba367e/geth && \
     npm install -g truffle@5.11.5 && \
     rm -rf /var/lib/apt/lists/*
 
