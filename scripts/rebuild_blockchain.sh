@@ -15,13 +15,13 @@ echo "==> Using ACR: $ACR_NAME in $RESOURCE_GROUP"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-echo "==> Building blockchain image with platform linux/amd64"
+echo "==> Building blockchain image with platform linux/arm64"
 cd "$WORKDIR"
 az acr build \
   -r "$ACR_NAME" \
   -t "fl-blockchain:$TAG" \
-  -f FL-deployment-test/docker/Dockerfile.blockchain \
-  --platform linux/amd64 \
+  -f deployment/docker/Dockerfile.blockchain \
+  --platform linux/arm64 \
   .
 
 echo "==> Restarting blockchain pod to use new image"
