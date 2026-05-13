@@ -11,7 +11,7 @@ LOCATION="${LOCATION:-centralindia}"
 AKS_NAME="${AKS_NAME:-fl-aks}"
 ACR_NAME="${ACR_NAME:-flacr$RANDOM}"          # must be globally unique
 NODE_COUNT="${NODE_COUNT:-3}"
-NODE_SIZE="${NODE_SIZE:-Standard_B2ps_v2}"
+NODE_SIZE="${NODE_SIZE:-Standard_D2as_v5}"
 TAG="${TAG:-v1}"
 REPO_URL="${REPO_URL:-https://github.com/anhkiet-dao/Project_NT114.git}"
 WORKDIR="${WORKDIR:-$PWD/Project_NT114}"
@@ -49,9 +49,9 @@ bash "$SCRIPT_DIR/apply-fixes.sh" "$WORKDIR"
 
 echo "==> 5/8 Build & push images via ACR Tasks (no local docker required)"
 cd "$WORKDIR"
-az acr build -r "$ACR_NAME" -t "fl-server:$TAG"     -f deployment/docker/Dockerfile.server     --platform linux/arm64 .
-az acr build -r "$ACR_NAME" -t "fl-client:$TAG"     -f deployment/docker/Dockerfile.client     --platform linux/arm64 .
-az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerfile.blockchain --platform linux/arm64 .
+az acr build -r "$ACR_NAME" -t "fl-server:$TAG"     -f deployment/docker/Dockerfile.server     --platform linux/amd64 .
+az acr build -r "$ACR_NAME" -t "fl-client:$TAG"     -f deployment/docker/Dockerfile.client     --platform linux/amd64 .
+az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerfile.blockchain --platform linux/amd64 .
 
 echo "==> 6/8 Render manifests with REGISTRY/TAG and apply"
 mkdir -p /tmp/k8s-rendered
