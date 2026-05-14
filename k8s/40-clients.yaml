@@ -38,6 +38,11 @@ spec:
           args:
             - |
               # Extract ordinal from pod name (e.g. fl-client-2 -> 2), then start
+              POD_NAME="${POD_NAME:-${HOSTNAME}}"
               CLIENT_ID="${POD_NAME##*-}"
+              if ! echo "$CLIENT_ID" | grep -Eq '^[0-9]+$'; then
+                echo "Invalid CLIENT_ID derived from POD_NAME='$POD_NAME'"
+                exit 1
+              fi
               echo "Starting client $CLIENT_ID ($SPLIT_TYPE)"
               python fl_client.py "$CLIENT_ID" "$SPLIT_TYPE"

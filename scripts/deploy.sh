@@ -56,7 +56,7 @@ az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerf
 echo "==> 6/8 Render manifests with REGISTRY/TAG and apply"
 mkdir -p /tmp/k8s-rendered
 for f in deployment/k8s/*.yaml; do
-  envsubst < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
+  envsubst '$REGISTRY $TAG' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
 done
 kubectl apply -f /tmp/k8s-rendered/00-namespaces.yaml
 kubectl apply -f /tmp/k8s-rendered/10-ipfs.yaml
