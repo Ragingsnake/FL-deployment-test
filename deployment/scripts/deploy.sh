@@ -32,10 +32,12 @@ az aks get-credentials -n "$AKS_NAME" -g "$RESOURCE_GROUP" --overwrite-existing
 REGISTRY="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
 export REGISTRY TAG
 
-echo "==> 3/8 Clone source"
-if [ ! -d "$WORKDIR" ]; then
-  git clone "$REPO_URL" "$WORKDIR"
+echo "==> 3/8 Prepare source (clone fresh)"
+if [ -d "$WORKDIR" ]; then
+  echo "Removing existing $WORKDIR"
+  rm -rf "$WORKDIR"
 fi
+git clone "$REPO_URL" "$WORKDIR"
 
 # Drop our deployment overlay into the source tree so Dockerfiles can find it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
