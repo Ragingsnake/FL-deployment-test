@@ -1,0 +1,8 @@
+# Ignore node_modules in the Project_NT114 checkout
+Project_NT114/node_modules/
+
+# Common ignores
+__pycache__/
+*.pyc
+.vscode/
+*.log
