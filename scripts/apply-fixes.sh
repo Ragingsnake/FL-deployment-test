@@ -34,7 +34,26 @@ p = root / "blockchain.py"
 if p.exists():
     s = p.read_text()
     if "import os" not in s.splitlines()[0:5]:
-        p.write_text("import os\n" + s)
+        s = "import os\n" + s
+
+    # Clique/PoA chains require middleware for 97-byte extraData fields.
+    if "middleware_onion.inject" not in s and "w3 = Web3(" in s:
+        s = re.sub(
+            r'(w3\s*=\s*Web3\([^\n]+\)\n)',
+            r'\1try:\n'
+            r'    from web3.middleware import ExtraDataToPOAMiddleware\n'
+            r'    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)\n'
+            r'except Exception:\n'
+            r'    try:\n'
+            r'        from web3.middleware import geth_poa_middleware\n'
+            r'        w3.middleware_onion.inject(geth_poa_middleware, layer=0)\n'
+            r'    except Exception:\n'
+            r'        pass\n',
+            s,
+            count=1,
+        )
+
+    p.write_text(s)
 
 # ipfs_utils.py — env-driven multiaddr
 patch("ipfs_utils.py", [
