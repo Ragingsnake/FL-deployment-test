@@ -32,7 +32,8 @@ az aks  create -n "$AKS_NAME" -g "$RESOURCE_GROUP" \
   --generate-ssh-keys -o none
 
 az aks get-credentials -n "$AKS_NAME" -g "$RESOURCE_GROUP" --overwrite-existing
-export TAG
+REGISTRY="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
+export REGISTRY TAG
 
 echo "==> 3/7 Prepare source (clone if needed)"
 if [ ! -d "$WORKDIR" ]; then
@@ -68,7 +69,7 @@ fi
 echo "==> 6/7 Render manifests and apply"
 mkdir -p /tmp/k8s-rendered
 for f in deployment/k8s/*.yaml; do
-  envsubst '$TAG' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
+  envsubst '$REGISTRY $TAG' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
   if [ -n "$DOCKERHUB_REPO" ]; then
     # force images to point to Docker Hub repo
     sed -i -E "s|image:\s+.*/([a-zA-Z0-9_\-]+):${TAG}|image: ${DOCKERHUB_REPO}/\1:${TAG}|g" "/tmp/k8s-rendered/$(basename "$f")"

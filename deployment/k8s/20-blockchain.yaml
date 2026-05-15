@@ -27,7 +27,7 @@ spec:
       containers:
         - name: geth
           image: ${REGISTRY}/fl-blockchain:${TAG}
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - { name: rpc, containerPort: 8545 }
             - { name: ws,  containerPort: 8546 }
@@ -35,15 +35,10 @@ spec:
             - { name: data, mountPath: /chain/data }
           readinessProbe:
             tcpSocket: { port: 8545 }
-            initialDelaySeconds: 150
-            periodSeconds: 10
-            failureThreshold: 60
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20
             timeoutSeconds: 5
-          livenessProbe:
-            tcpSocket: { port: 8545 }
-            initialDelaySeconds: 180
-            periodSeconds: 30
-            failureThreshold: 3
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -74,7 +69,6 @@ spec:
       containers:
         - name: truffle
           image: ${REGISTRY}/fl-blockchain:${TAG}
-          imagePullPolicy: Always
           command:
             - /bin/bash
             - -c
