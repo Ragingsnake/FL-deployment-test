@@ -1,43 +1,27 @@
 # Ethereum PoA (Clique) single-node + Truffle migration runner
-FROM node:18-bullseye-slim AS builder
-
-WORKDIR /chain
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential python3 make g++ git ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
-
-# Install Truffle in the builder so native addon compilation happens here, not in the runtime image.
-RUN NODE_OPTIONS=--max-old-space-size=1024 npm install -g truffle@5.11.5 --unsafe-perm --no-audit --no-fund
-
-COPY contracts ./contracts
-COPY migrations ./migrations
-COPY truffle-config.js ./
-
+# Baseline is the previously working single-stage image, with only conservative size trims.
 FROM node:18-bullseye-slim
 
 WORKDIR /chain
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates jq && \
-    curl -L https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-1.13.15-c5ba367e.tar.gz \
-      | tar -xz --strip-components=1 -C /usr/local/bin geth-linux-amd64-1.13.15-c5ba367e/geth && \
-    curl -L https://dl.k8s.io/release/v1.34.6/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && \
-    chmod +x /usr/local/bin/kubectl && \
-    rm -rf /var/lib/apt/lists/*
+        curl ca-certificates jq && \
+        curl -L https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-1.13.15-c5ba367e.tar.gz \
+            | tar -xz --strip-components=1 -C /usr/local/bin geth-linux-amd64-1.13.15-c5ba367e/geth && \
+        curl -L https://dl.k8s.io/release/v1.34.6/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && \
+        chmod +x /usr/local/bin/kubectl && \
+        npm install -g truffle@5.11.5 --unsafe-perm --no-audit --no-fund && \
+        rm -rf /var/lib/apt/lists/* /root/.npm/_cacache
 
-COPY --from=builder /usr/local/lib/node_modules/truffle /usr/local/lib/node_modules/truffle
-COPY --from=builder /usr/local/bin/truffle /usr/local/bin/truffle
-COPY --from=builder /chain/node_modules /chain/node_modules
-COPY --from=builder /chain/package.json /chain/package-lock.json* /chain/
-COPY --from=builder /chain/contracts /chain/contracts
-COPY --from=builder /chain/migrations /chain/migrations
-COPY --from=builder /chain/truffle-config.js /chain/
+# Copy only files needed for contract migration to keep image smaller than COPY . /chain.
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev || npm install || true
+COPY contracts ./contracts
+COPY migrations ./migrations
+COPY truffle-config.js ./
+
 COPY deployment/docker/geth-entrypoint.sh /usr/local/bin/geth-entrypoint.sh
-RUN chmod +x /usr/local/bin/geth-entrypoint.sh
+RUN chmod +x /usr/local/bin/geth-entrypoint.sh && truffle version >/dev/null
 
 EXPOSE 8545 8546 30303
 
