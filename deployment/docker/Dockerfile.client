@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 COPY fl_client.py model.py blockchain.py reputation.py ipfs_utils.py utils.py zkp_utils.py comparison.py comparison_1.py plot_results.py ./
 COPY FL_Client ./FL_Client
 COPY data_new ./data_new
+COPY build/contracts ./build/contracts
 
 FROM python:3.10-slim
 
@@ -30,5 +31,6 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /app/fl_client.py /app/model.py /app/blockchain.py /app/reputation.py /app/ipfs_utils.py /app/utils.py /app/zkp_utils.py /app/comparison.py /app/comparison_1.py /app/plot_results.py /app/
 COPY --from=builder /app/FL_Client /app/FL_Client
 COPY --from=builder /app/data_new /app/data_new
+COPY --from=builder /app/build/contracts /app/build/contracts
 
 CMD ["sh", "-c", "python fl_client.py ${CLIENT_ID} ${SPLIT_TYPE}"]
