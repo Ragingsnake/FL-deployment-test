@@ -1,5 +1,23 @@
 # Ethereum PoA (Clique) single-node + Truffle migration runner
-FROM node:18-bullseye
+FROM node:18-bullseye-slim AS builder
+
+WORKDIR /chain
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential python3 make g++ git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+
+# Install Truffle in the builder so native addon compilation happens here, not in the runtime image.
+RUN NODE_OPTIONS=--max-old-space-size=1024 npm install -g truffle@5.11.5 --unsafe-perm --no-audit --no-fund
+
+COPY contracts ./contracts
+COPY migrations ./migrations
+COPY truffle-config.js ./
+
+FROM node:18-bullseye-slim
 
 WORKDIR /chain
 
@@ -11,14 +29,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chmod +x /usr/local/bin/kubectl && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Truffle in a separate RUN to avoid high peak memory during the combined step
-# Limit Node's heap for the install to reduce chance of OOM (exit code 137)
-RUN NODE_OPTIONS=--max-old-space-size=1024 npm install -g truffle@5.11.5 --unsafe-perm --no-audit --no-fund
-# Project files (contracts, migrations, truffle-config.js)
-COPY . /chain
-
-RUN npm install || true
-
+COPY --from=builder /usr/local/lib/node_modules/truffle /usr/local/lib/node_modules/truffle
+COPY --from=builder /usr/local/bin/truffle /usr/local/bin/truffle
+COPY --from=builder /chain/node_modules /chain/node_modules
+COPY --from=builder /chain/package.json /chain/package-lock.json* /chain/
+COPY --from=builder /chain/contracts /chain/contracts
+COPY --from=builder /chain/migrations /chain/migrations
+COPY --from=builder /chain/truffle-config.js /chain/
 COPY deployment/docker/geth-entrypoint.sh /usr/local/bin/geth-entrypoint.sh
 RUN chmod +x /usr/local/bin/geth-entrypoint.sh
 

@@ -1,6 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 flwr==1.8.0
-torch==2.2.2
-torchvision==0.17.2
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
 numpy==1.26.4
 scikit-learn==1.4.2
 matplotlib==3.8.4

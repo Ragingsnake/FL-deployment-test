@@ -1,24 +1,34 @@
 # FL Client container — runs one training participant
-FROM python:3.10-slim
+FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    python -m venv /opt/venv
+
+ENV PATH=/opt/venv/bin:$PATH
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY fl_client.py model.py blockchain.py reputation.py ipfs_utils.py utils.py zkp_utils.py comparison.py comparison_1.py plot_results.py ./
+COPY FL_Client ./FL_Client
+COPY data_new ./data_new
+
+FROM python:3.10-slim
+
+WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
-#     FL_SERVER_HOST=fl-server-svc.fl-clients.svc.cluster.local \
-#     FL_SERVER_PORT=8080 \
-#     IPFS_API=/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001 \
-#     ETH_RPC=http://geth-svc.blockchain.svc.cluster.local:8545 \
-#     SPLIT_TYPE=non_iid
+    PYTHONPATH=/app \
+    PATH=/opt/venv/bin:$PATH
 
-# # CLIENT_ID is injected per pod via env
-# CMD ["sh", "-c", "python fl_client.py ${CLIENT_ID} ${SPLIT_TYPE}"]
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app/fl_client.py /app/model.py /app/blockchain.py /app/reputation.py /app/ipfs_utils.py /app/utils.py /app/zkp_utils.py /app/comparison.py /app/comparison_1.py /app/plot_results.py /app/
+COPY --from=builder /app/FL_Client /app/FL_Client
+COPY --from=builder /app/data_new /app/data_new
+
+CMD ["sh", "-c", "python fl_client.py ${CLIENT_ID} ${SPLIT_TYPE}"]

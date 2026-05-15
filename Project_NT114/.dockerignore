@@ -1,0 +1,26 @@
+# Source control and editor noise
+.git/
+.vscode/
+__pycache__/
+*.pyc
+*.log
+
+# Large or non-runtime artifacts
+node_modules/
+build/
+picture/
+history/
+models/
+*.pth
+*.pt
+*.ckpt
+*.ipynb
+*.drawio
+*.md
+
+# Repo tooling that should not go into app images
+deployment/k8s/
+deployment/scripts/
+test/
+tests/
+.pytest_cache/
