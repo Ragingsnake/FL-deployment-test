@@ -60,10 +60,12 @@ class FlowerClient(fl.client.NumPyClient):
         
         if is_faulty:
             print(f"⚠ Client {self.client_id} is FAULTY")
-            
-        global_params = [torch.from_numpy(p).to(DEVICE) for p in parameters]
-        
-        global_params = [p.detach().clone().to(DEVICE) for p in global_params]
+        trainable_names = {name for name, _ in self.model.named_parameters()}
+        global_params = {
+            name: torch.from_numpy(value).to(DEVICE).detach().clone()
+            for name, value in zip(self.model.state_dict().keys(), parameters)
+            if name in trainable_names
+        }
         
         result = train(self.model, self.trainloader, global_params, self.criterion)
         print(f"[Client {self.client_id}] Acc: {result['accuracy']:.4f} | Loss: {result['loss']:.4f}")

@@ -47,10 +47,14 @@ def train(model, trainloader, global_params, criterion):
     total_loss, correct, total = 0.0, 0, 0
     start_time = time.time()
 
-    # ==============================
-    # 🔥 TỐI ƯU FEDPROX (flatten 1 lần)
-    # ==============================
-    global_vector = torch.cat([p.view(-1) for p in global_params])
+    # Keep only trainable parameters, keyed by name, to avoid buffer/shape mismatches.
+    if isinstance(global_params, dict):
+        global_param_dict = global_params
+    else:
+        global_param_dict = {
+            name: tensor
+            for (name, _), tensor in zip(model.named_parameters(), global_params)
+        }
 
     # ==============================
     # TRAINING LOOP
@@ -67,10 +71,11 @@ def train(model, trainloader, global_params, criterion):
             # ==============================
             # 🔥 FEDPROX (giảm tần suất + vector hóa)
             # ==============================
-            if batch_idx % 5 == 0: 
+            if batch_idx % 5 == 0:
                 prox_term = 0.0
-                for w, w_t in zip(model.parameters(), global_params):
-                    prox_term += torch.sum((w - w_t) ** 2)
+                for name, w in model.named_parameters():
+                    if name in global_param_dict:
+                        prox_term += torch.sum((w - global_param_dict[name]) ** 2)
             else:
                 prox_term = 0.0
 
