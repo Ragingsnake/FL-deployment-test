@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
+# 1) Đặt biến WORKDIR (nếu khác, chỉnh lại)
+# WORKDIR=~/Project_NT114
+
+# 2) Copy overlay deployment của bạn vào source (nếu chưa)
+# cp -R ~/deployment "$WORKDIR/deployment"
+
+# 3) Copy file requirements cho Docker build context
+# cp ~/deployment/docker/requirements.txt "$WORKDIR/requirements.txt"
+
+# 4) Chạy script sửa code (inject PoA middleware, thay biến env, ...)
+# bash ~/deployment/scripts/apply-fixes.sh "$WORKDIR"
+
+# 5) Chuyển vào thư mục source trước khi build
+# cd "$WORKDIR"
+
+# 6) Build & push lên Docker Hub (hoặc gọi script build/push đã tạo)
+# Ví dụ dùng script bạn đã thêm:
+# ./deployment/scripts/build_and_push_dockerhub.sh <your-dockerhub-user> v1 linux/amd64
+# (hoặc chạy thủ công: docker build / docker push; nhớ docker login trước)
+
 # Build local images and push to Docker Hub
 # Usage: build_and_push_dockerhub.sh DOCKERHUB_REPO [TAG] [PLATFORM]
 # Example: ./build_and_push_dockerhub.sh myuser v1 linux/amd64
