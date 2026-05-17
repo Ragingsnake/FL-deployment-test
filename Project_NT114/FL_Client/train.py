@@ -3,9 +3,9 @@ import torch
 import time
 
 DEVICE = torch.device("cpu")   
-MU = 0.001
-LR = 0.0005
-EPOCHS = 2
+MU = 0.005  # FIXED: Increased from 0.001 for stronger regularization
+LR = 0.001  # FIXED: Increased from 0.0005 to help clients learn more locally
+EPOCHS = 3  # FIXED: Increased from 2 to give clients more training time
 
 torch.set_num_threads(8)       
 torch.set_num_interop_threads(4)
@@ -69,15 +69,12 @@ def train(model, trainloader, global_params, criterion):
             loss = criterion(output, target)
 
             # ==============================
-            # 🔥 FEDPROX (giảm tần suất + vector hóa)
+            # 🔥 FEDPROX (now applied to ALL batches for consistent regularization)
             # ==============================
-            if batch_idx % 5 == 0:
-                prox_term = 0.0
-                for name, w in model.named_parameters():
-                    if name in global_param_dict:
-                        prox_term += torch.sum((w - global_param_dict[name]) ** 2)
-            else:
-                prox_term = 0.0
+            prox_term = 0.0
+            for name, w in model.named_parameters():
+                if name in global_param_dict:
+                    prox_term += torch.sum((w - global_param_dict[name]) ** 2)
 
             loss = loss + (MU / 2) * prox_term
 

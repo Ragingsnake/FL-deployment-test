@@ -1,7 +1,8 @@
 ROUNDS = 50
 NUM_CLIENTS = 5
 
-LR = 0.0007
+# FIXED: Reduced FedAdam learning rate to prevent oscillations
+LR = 0.0002  # was 0.0007 - too aggressive, caused 0.32 → 0.68 jumps
 BETA1 = 0.9
 BETA2 = 0.99
 EPS = 1e-8

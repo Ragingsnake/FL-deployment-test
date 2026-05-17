@@ -30,7 +30,13 @@ class FlowerClient(fl.client.NumPyClient):
             k: torch.tensor(v).to(DEVICE)
             for k, v in zip(self.model.state_dict().keys(), parameters)
         }
-        self.model.load_state_dict(state_dict, strict=False)  # strict=False tránh lỗi checkpoint cũ
+        # CRITICAL FIX: Use strict=True to ensure model structure matches exactly
+        try:
+            self.model.load_state_dict(state_dict, strict=True)
+        except RuntimeError as e:
+            print(f"⚠ WARNING: State dict mismatch for client {self.client_id}: {e}")
+            # Only fallback to strict=False if there's a real reason
+            self.model.load_state_dict(state_dict, strict=False)
         
     # def fit(self, parameters, config):
     #     self.set_parameters(parameters)

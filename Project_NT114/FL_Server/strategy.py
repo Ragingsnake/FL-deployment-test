@@ -76,8 +76,22 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             return None, {}
         
         # ===== INITIALIZE GLOBAL MODEL =====
-        if self.global_weights is None: 
-            self.global_weights = clients_info[0]["params"]
+        if self.global_weights is None:
+            # FIX: Average all initial client weights instead of using only Client 0
+            print("🔄 First round: averaging all client updates for initial global model...")
+            all_params = [info["params"] for info in clients_info]
+            num_clients = len(all_params)
+            
+            averaged_weights = []
+            for layer_idx in range(len(all_params[0])):
+                layer_avg = np.mean(
+                    [params[layer_idx] for params in all_params],
+                    axis=0
+                )
+                averaged_weights.append(layer_avg)
+            
+            self.global_weights = averaged_weights
+            print(f"✓ Initialized global weights from average of {num_clients} clients")
 
         # ===== CLIENT EVALUATION =====
         client_weights_dict = {info["client_id"]: 

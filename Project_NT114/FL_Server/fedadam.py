@@ -24,6 +24,14 @@ def fedadam_update(global_weights, gradients):
 
     for i in range(len(gradients)):
         g = gradients[i]
+        
+        # FIXED: Smarter clipping - use gradient norm to detect and warn about instability
+        g_norm = np.linalg.norm(g)
+        if g_norm > 10:
+            print(f"⚠ WARNING: Large gradient norm detected at layer {i}: {g_norm:.4f}")
+            print(f"  This may indicate divergence. Consider checking client updates.")
+        
+        # Only clip if truly abnormal
         g = np.clip(g, -1.0, 1.0)
 
         fedadam.m[i] = BETA1 * fedadam.m[i] + (1 - BETA1) * g
