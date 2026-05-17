@@ -38,4 +38,3 @@ COPY --from=builder /app/build/contracts/ /app/build/contracts
 EXPOSE 8080
 
 CMD ["python", "fl_server.py"]
-
