@@ -30,12 +30,12 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
 
         self.start_time = None
 
-        # Initialize from the actual model weights, not from client_0's first upload.
-        # Using client_0's params as the baseline caused round-1 deltas and cosine
-        # similarities to be measured against a random local model, poisoning all
-        # initial reputation scores.
+        # Initialize from full state_dict — must match get_parameters() which returns
+        # state_dict().values(). Using model.parameters() here would give fewer tensors
+        # than clients send back, causing gradient zip mismatch and wrong delta/cosine
+        # computations in the reputation system.
         _model = CNN()
-        self.global_weights = [p.detach().cpu().numpy() for p in _model.parameters()]
+        self.global_weights = [v.detach().cpu().numpy() for v in _model.state_dict().values()]
 
         self.history = {
             "global": {
@@ -72,7 +72,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             round_verify_times.append(time.time() - start)
 
             if not verified:
-                print(f"❌ ZKP FAILED for Client {cid}")
+                print(f"ZKP FAILED for Client {cid}")
                 reputation_manager.update_reputation(cid, -1.0)
                 continue
 
@@ -146,7 +146,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
 
             # Skip genuinely bad clients
             if score < -0.4 or reputation < 0.2:
-                print(f"🚫 Skip client {cid} (score={score:.3f}, rep={reputation:.3f})")
+                print(f"Skip client {cid} (score={score:.3f}, rep={reputation:.3f})")
                 penalty_clients.append(cid)
                 continue
 
@@ -170,7 +170,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             self._update_client_history(cid, server_round, info, reputation)
 
         if not gradients:
-            print("❌ No valid clients for aggregation")
+            print("No valid clients for aggregation")
             return None, {}
 
         # ===== WEIGHTED GRADIENT AGGREGATION =====
@@ -215,7 +215,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             with open("history/server_history_fedadam.json", "w", encoding="utf-8") as f:
                 json.dump(self.history, f, indent=4)
         except Exception as e:
-            print(f"❌ Error saving history: {e}")
+            print(f"Error saving history: {e}")
 
         return avg_loss, {"accuracy": avg_acc}
 

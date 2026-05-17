@@ -16,15 +16,10 @@ from FL_Client.evaluate import evaluate
 from FL_Client.faulty import corrupt_parameters
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Controls whether model is uploaded to IPFS every round.
-# Set SKIP_IPFS=1 during development/benchmarking to remove upload latency.
-# In production leave unset or set to 0.
-# SKIP_IPFS = os.environ.get("SKIP_IPFS", "0") == "1"
+#SKIP_IPFS = os.environ.get("SKIP_IPFS", "0") == "1"
 SKIP_IPFS = False
 
 def _upload_async(model_path, round_num, client_id, proof_hash, accuracy):
-    """Upload to IPFS and submit blockchain tx off the critical path."""
     cid = upload_to_ipfs(model_path) if not SKIP_IPFS else "SKIPPED"
     try:
         submit_update(round_num, client_id, cid, proof_hash, accuracy)
@@ -40,15 +35,18 @@ class FlowerClient(fl.client.NumPyClient):
         self.criterion = nn.CrossEntropyLoss()
 
     def get_parameters(self, config):
-        # Return only trainable parameters — excludes BatchNorm running stats
-        # (running_mean, running_var, num_batches_tracked) which are buffers,
-        # not weights. Sending buffers wastes bandwidth every round.
-        return [p.detach().cpu().numpy() for p in self.model.parameters()]
+        # Full state_dict — MUST include BatchNorm running stats
+        # (running_mean, running_var, num_batches_tracked).
+        # model.eval() uses running stats not batch stats, so if these aren't
+        # federated the global model evaluates at near-random accuracy (~0.03).
+        return [v.detach().cpu().numpy() for v in self.model.state_dict().values()]
 
     def set_parameters(self, parameters):
-        # Match incoming parameters to named_parameters (trainable only)
-        for param, value in zip(self.model.parameters(), parameters):
-            param.data = torch.tensor(value).to(DEVICE)
+        state_dict = {
+            k: torch.tensor(v).to(DEVICE)
+            for k, v in zip(self.model.state_dict().keys(), parameters)
+        }
+        self.model.load_state_dict(state_dict, strict=False)
 
     def fit(self, parameters, config):
         self.set_parameters(parameters)
@@ -60,19 +58,7 @@ class FlowerClient(fl.client.NumPyClient):
         if is_faulty:
             print(f"⚠ Client {self.client_id} is FAULTY this round")
 
-        # Build global_params dict for FedProx (trainable params only)
-        global_params = {
-            name: p.detach().clone().to(DEVICE)
-            for name, p in zip(
-                [n for n, _ in self.model.named_parameters()],
-                parameters
-            )
-            for p in [torch.tensor(
-                next(v for n2, v in zip([n2 for n2, _ in self.model.named_parameters()], parameters) 
-                     if n2 == name)
-            ).to(DEVICE)]
-        }
-        # Simpler equivalent:
+        # FedProx global_params: named_parameters only (no BN buffers needed here)
         global_params = {}
         for (name, _), value in zip(self.model.named_parameters(), parameters):
             global_params[name] = torch.tensor(value).to(DEVICE).detach().clone()
@@ -88,16 +74,13 @@ class FlowerClient(fl.client.NumPyClient):
 
         proof = generate_proof(params)
         proof_str = json.dumps(proof)
-        proof_hash = hashlib.sha256((proof_str).encode()).hexdigest()
+        proof_hash = hashlib.sha256(proof_str.encode()).hexdigest()
 
-        # Save model only every 5 rounds to reduce disk I/O
-        # (was saving every round × 5 clients = 250 writes for 50 rounds)
+        # Save + upload only every 5 rounds — was 250 writes/run, now 50
         if round_num % 5 == 0:
             os.makedirs("models/clients", exist_ok=True)
             model_path = f"models/clients/client{self.client_id}_round{round_num}.pth"
             torch.save(self.model.state_dict(), model_path)
-
-            # IPFS upload + blockchain submit off the critical path
             threading.Thread(
                 target=_upload_async,
                 args=(model_path, round_num, self.client_id, proof_hash, result["accuracy"]),
