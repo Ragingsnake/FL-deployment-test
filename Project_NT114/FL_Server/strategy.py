@@ -3,6 +3,7 @@ import numpy as np
 import json
 import time
 import os
+import torch
 
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
 
@@ -11,7 +12,7 @@ from reputation import evaluate_clients
 from zkp_utils import verify_proof
 from model import CNN
 
-from FL_Server.config import NUM_CLIENTS, BASE_LAMBDA, MAX_LAMBDA
+from FL_Server.config import NUM_CLIENTS, BASE_LAMBDA, MAX_LAMBDA, WARMUP_ROUNDS
 from FL_Server.reputation import reputation_manager
 from FL_Server.defense import compute_delta
 from FL_Server.fedadam import fedadam_update
@@ -26,17 +27,31 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             min_fit_clients=NUM_CLIENTS,
             min_available_clients=NUM_CLIENTS
         )
-        
+
         self.start_time = None
-        self.global_weights = None
+
+        # Initialize from the actual model weights, not from client_0's first upload.
+        # Using client_0's params as the baseline caused round-1 deltas and cosine
+        # similarities to be measured against a random local model, poisoning all
+        # initial reputation scores.
+        _model = CNN()
+        self.global_weights = [p.detach().cpu().numpy() for p in _model.parameters()]
+
         self.history = {
-            "global": {"round": [], "accuracy": [], "loss": [], "verification_time": [], "penalty_clients": [], "round_time": []},
+            "global": {
+                "round": [],
+                "accuracy": [],
+                "loss": [],
+                "verification_time": [],
+                "penalty_clients": [],
+                "round_time": []
+            },
             "clients": {}
         }
 
     def aggregate_fit(self, server_round, results, failures):
         self.start_time = time.time()
-        if not results: 
+        if not results:
             return None, {}
 
         clients_info = []
@@ -58,10 +73,10 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
 
             if not verified:
                 print(f"❌ ZKP FAILED for Client {cid}")
-                reputation_manager.update_reputation(cid, -1.0) 
-                # penalty_this_round.append(cid)
+                reputation_manager.update_reputation(cid, -1.0)
                 continue
 
+            # Fire blockchain verify — non-blocking, no reputation side-effect
             verify_update(cid, server_round, True)
 
             clients_info.append({
@@ -71,32 +86,53 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
                 "test_loss": metrics.get("local_loss", 0),
                 "train_time": metrics.get("train_time", 0)
             })
-            
-        if not clients_info: 
+
+        if not clients_info:
             return None, {}
-        
-        # ===== INITIALIZE GLOBAL MODEL =====
-        if self.global_weights is None: 
-            self.global_weights = clients_info[0]["params"]
+
+        # ===== WARMUP: skip defense for first N rounds =====
+        # Gradients are large and noisy during warmup — normal behavior, not attacks.
+        # Penalizing here pollutes reputation with meaningless early-round noise.
+        if server_round <= WARMUP_ROUNDS:
+            print(f"[Warmup Round {server_round}/{WARMUP_ROUNDS}] Skipping reputation/defense")
+            gradients = []
+            weights_list = []
+
+            for info in clients_info:
+                grad = [lw - gw for lw, gw in zip(info["params"], self.global_weights)]
+                gradients.append(grad)
+                weights_list.append(1.0)  # equal weight during warmup
+
+                self._update_client_history(
+                    info["client_id"], server_round, info,
+                    rep_val=reputation_manager.get(info["client_id"])
+                )
+
+            total_weight = sum(weights_list) + 1e-8
+            agg_grad = [
+                sum(grad[i] * w for grad, w in zip(gradients, weights_list)) / total_weight
+                for i in range(len(gradients[0]))
+            ]
+            self.global_weights = fedadam_update(self.global_weights, agg_grad)
+
+            if round_verify_times:
+                self.history["global"]["verification_time"].append(float(np.mean(round_verify_times)))
+                self.history["global"]["penalty_clients"].append([])
+
+            return ndarrays_to_parameters(self.global_weights), {}
 
         # ===== CLIENT EVALUATION =====
-        client_weights_dict = {info["client_id"]: 
-            info["params"] for info in clients_info}
-        
-        eval_results, Q1, Q3 = evaluate_clients(
-            self.global_weights, 
-            client_weights_dict, 
+        client_weights_dict = {info["client_id"]: info["params"] for info in clients_info}
+
+        # evaluate_clients now returns (results, mean_delta, std_delta)
+        # It handles outlier detection internally via z-score — no second IQR pass here.
+        eval_results, mean_delta, std_delta = evaluate_clients(
+            self.global_weights,
+            client_weights_dict,
             clients_info
         )
-        
-        # ===== IQR OUTLIER DETECTION =====
-        IQR = Q3 - Q1
 
-        lower = Q1 - 1.5 * IQR
-        upper = Q3 + 1.5 * IQR
-        
         # ===== REWARD + GRADIENT =====
-
         gradients = []
         final_weights = []
         LAMBDA = min(MAX_LAMBDA, BASE_LAMBDA + server_round * 0.005)
@@ -108,47 +144,30 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             reputation = res["reputation"]
             score = res["score"]
 
-            # ===== SKIP CLIENT XẤU =====
+            # Skip genuinely bad clients
             if score < -0.4 or reputation < 0.2:
                 print(f"🚫 Skip client {cid} (score={score:.3f}, rep={reputation:.3f})")
                 penalty_clients.append(cid)
                 continue
 
-            # ===== COMPUTE DELTA =====
+            # REMOVED: duplicate IQR outlier block that was here.
+            # evaluate_clients already applied z-score outlier penalty to the score,
+            # which already updated reputation. Adding reputation *= 0.7 here was a
+            # second penalty in the same round on the same client — primary cause of
+            # the 0.68 → 0.65 accuracy drop after round 13.
+
             delta = compute_delta(self.global_weights, info["params"])
-
-            # ===== IQR OUTLIER DEFENSE =====
-            if delta < lower or delta > upper:
-
-                print(f"⚠ Outlier Client {cid} (Δ={delta:.4f})")
-
-                reputation *= 0.7
-
-                penalty_clients.append(cid)
-            
-            # ===== COMPUTE REWARD =====    
             gamma = np.exp(-BASE_LAMBDA * delta)
-
             reward = np.sqrt(reputation) * gamma
             reward = np.clip(reward, 0.05, 1.5)
 
-            # ===== COMPUTE GRADIENT =====
-            grad = [
-                local_w - global_w
-                for local_w, global_w in zip(info["params"], self.global_weights)
-            ]
-
+            grad = [lw - gw for lw, gw in zip(info["params"], self.global_weights)]
             gradients.append(grad)
             final_weights.append(reward)
 
             print(f"Client {cid} | reputation={reputation:.3f} | reward={reward:.3f}")
 
-            self._update_client_history(
-                cid, 
-                server_round, 
-                info, 
-                reputation
-            )
+            self._update_client_history(cid, server_round, info, reputation)
 
         if not gradients:
             print("❌ No valid clients for aggregation")
@@ -156,48 +175,28 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
 
         # ===== WEIGHTED GRADIENT AGGREGATION =====
         total_weight = sum(final_weights) + 1e-8
-        agg_grad = []
-
-        for layer_idx in range(len(gradients[0])):
-
-            layer_sum = sum(
-                grad[layer_idx] * weight
-                for grad, weight in zip(gradients, final_weights)
-            )
-
-            layer_avg = layer_sum / total_weight
-
-            layer_avg = np.clip(layer_avg, -1, 1)
-
-            agg_grad.append(layer_avg)
+        agg_grad = [
+            sum(grad[i] * w for grad, w in zip(gradients, final_weights)) / total_weight
+            for i in range(len(gradients[0]))
+        ]
 
         # ===== FEDADAM UPDATE =====
-        self.global_weights = fedadam_update(
-            self.global_weights,
-            agg_grad
-        )
-        
+        self.global_weights = fedadam_update(self.global_weights, agg_grad)
+
         # ===== LOGGING =====
         if round_verify_times:
             self.history["global"]["verification_time"].append(float(np.mean(round_verify_times)))
             self.history["global"]["penalty_clients"].append(penalty_clients)
 
         return ndarrays_to_parameters(self.global_weights), {}
-    
-    # ================= EVALUATE (Chèn vào sau hàm aggregate_fit) =================
+
+    # ================= EVALUATE =================
     def aggregate_evaluate(self, server_round, results, failures):
         if not results:
             return None, {}
 
-        accuracies = [
-            r.metrics.get("accuracy", 0) 
-            for _, r in results
-        ]
-        
-        losses = [
-            r.loss 
-            for _, r in results
-        ]
+        accuracies = [r.metrics.get("accuracy", 0) for _, r in results]
+        losses = [r.loss for _, r in results]
 
         avg_acc = float(np.mean(accuracies))
         avg_loss = float(np.mean(losses))
@@ -208,18 +207,13 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
         self.history["global"]["round"].append(server_round)
         self.history["global"]["accuracy"].append(avg_acc)
         self.history["global"]["loss"].append(avg_loss)
-        
+
         if self.start_time:
-            round_duration = time.time() - self.start_time
-            self.history["global"]["round_time"].append(float(round_duration))
+            self.history["global"]["round_time"].append(float(time.time() - self.start_time))
 
         try:
-            with open("history/server_history_fedadam.json", 
-                      "w", 
-                      encoding="utf-8"
-            ) as f:
+            with open("history/server_history_fedadam.json", "w", encoding="utf-8") as f:
                 json.dump(self.history, f, indent=4)
-                
         except Exception as e:
             print(f"❌ Error saving history: {e}")
 
@@ -228,8 +222,10 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
     def _update_client_history(self, cid, server_round, info, rep_val):
         cid_str = str(cid)
         if cid_str not in self.history["clients"]:
-            self.history["clients"][cid_str] = {"round": [], "test_accuracy": [], "test_loss": [], "reputation": [], "train_time": []}
-        
+            self.history["clients"][cid_str] = {
+                "round": [], "test_accuracy": [], "test_loss": [],
+                "reputation": [], "train_time": []
+            }
         h = self.history["clients"][cid_str]
         h["round"].append(server_round)
         h["test_accuracy"].append(info["test_acc"])

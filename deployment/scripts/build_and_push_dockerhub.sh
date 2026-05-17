@@ -3,19 +3,19 @@ set -euo pipefail
 
 
 # 1) Đặt biến WORKDIR (nếu khác, chỉnh lại)
-# WORKDIR=~/Project_NT114
+WORKDIR=~/Project_NT114
 
 # 2) Copy overlay deployment của bạn vào source (nếu chưa)
-# cp -R ~/deployment "$WORKDIR/deployment"
+cp -R ~/deployment "$WORKDIR/deployment"
 
 # 3) Copy file requirements cho Docker build context
-# cp ~/deployment/docker/requirements.txt "$WORKDIR/requirements.txt"
+cp ~/deployment/docker/requirements.txt "$WORKDIR/requirements.txt"
 
 # 4) Chạy script sửa code (inject PoA middleware, thay biến env, ...)
-# bash ~/deployment/scripts/apply-fixes.sh "$WORKDIR"
+bash ~/deployment/scripts/apply-fixes.sh "$WORKDIR"
 
 # 5) Chuyển vào thư mục source trước khi build
-# cd "$WORKDIR"
+cd "$WORKDIR"
 
 # 6) Build & push lên Docker Hub (hoặc gọi script build/push đã tạo)
 # Ví dụ dùng script bạn đã thêm:

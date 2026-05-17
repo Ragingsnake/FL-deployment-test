@@ -1,7 +1,11 @@
 import flwr as fl
 import torch
 import torch.nn as nn
-import os, json, hashlib
+import os
+import json
+import hashlib
+import threading
+
 from model import CNN
 from utils import load_client_data
 from ipfs_utils import upload_to_ipfs
@@ -9,85 +13,99 @@ from zkp_utils import generate_proof
 from blockchain import submit_update
 from FL_Client.train import train
 from FL_Client.evaluate import evaluate
-from FL_Client.faulty import is_faulty_client, corrupt_parameters
+from FL_Client.faulty import corrupt_parameters
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Controls whether model is uploaded to IPFS every round.
+# Set SKIP_IPFS=1 during development/benchmarking to remove upload latency.
+# In production leave unset or set to 0.
+# SKIP_IPFS = os.environ.get("SKIP_IPFS", "0") == "1"
+SKIP_IPFS = False
+
+def _upload_async(model_path, round_num, client_id, proof_hash, accuracy):
+    """Upload to IPFS and submit blockchain tx off the critical path."""
+    cid = upload_to_ipfs(model_path) if not SKIP_IPFS else "SKIPPED"
+    try:
+        submit_update(round_num, client_id, cid, proof_hash, accuracy)
+    except Exception as e:
+        print(f"[Client {client_id}] Blockchain submit error (non-fatal): {e}")
+
 
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self, client_id, split_type):
         self.client_id = client_id
-        
-        self.model = CNN(num_classes=62).to(DEVICE)  # EMNIST ByClass
-        
+        self.model = CNN(num_classes=62).to(DEVICE)
         self.trainloader, self.testloader = load_client_data(client_id, split_type)
         self.criterion = nn.CrossEntropyLoss()
 
     def get_parameters(self, config):
-        return [v.detach().cpu().numpy() for v in self.model.state_dict().values()]
+        # Return only trainable parameters — excludes BatchNorm running stats
+        # (running_mean, running_var, num_batches_tracked) which are buffers,
+        # not weights. Sending buffers wastes bandwidth every round.
+        return [p.detach().cpu().numpy() for p in self.model.parameters()]
 
     def set_parameters(self, parameters):
-        state_dict = {
-            k: torch.tensor(v).to(DEVICE)
-            for k, v in zip(self.model.state_dict().keys(), parameters)
-        }
-        self.model.load_state_dict(state_dict, strict=False)  # strict=False tránh lỗi checkpoint cũ
-        
-    # def fit(self, parameters, config):
-    #     self.set_parameters(parameters)
-
-    #     result = train(self.model, self.trainloader, None, self.criterion)
-
-    #     print(f"[Client {self.client_id}] Acc: {result['accuracy']:.4f} | Loss: {result['loss']:.4f}")
-
-    #     params = self.get_parameters({})
-
-    #     metrics = {
-    #         "client_id": self.client_id,
-    #         "train_time": result["time"],
-    #         "test_acc": result["accuracy"],
-    #         "test_loss": result["loss"],
-    #     }
-
-    #     return params, len(self.trainloader.dataset), metrics
+        # Match incoming parameters to named_parameters (trainable only)
+        for param, value in zip(self.model.parameters(), parameters):
+            param.data = torch.tensor(value).to(DEVICE)
 
     def fit(self, parameters, config):
         self.set_parameters(parameters)
         round_num = config.get("server_round", 1)
-        
+
         faulty_clients = config.get("faulty_clients", [])
-
         is_faulty = self.client_id in faulty_clients
-        
+
         if is_faulty:
-            print(f"⚠ Client {self.client_id} is FAULTY")
-        trainable_names = {name for name, _ in self.model.named_parameters()}
+            print(f"⚠ Client {self.client_id} is FAULTY this round")
+
+        # Build global_params dict for FedProx (trainable params only)
         global_params = {
-            name: torch.from_numpy(value).to(DEVICE).detach().clone()
-            for name, value in zip(self.model.state_dict().keys(), parameters)
-            if name in trainable_names
+            name: p.detach().clone().to(DEVICE)
+            for name, p in zip(
+                [n for n, _ in self.model.named_parameters()],
+                parameters
+            )
+            for p in [torch.tensor(
+                next(v for n2, v in zip([n2 for n2, _ in self.model.named_parameters()], parameters) 
+                     if n2 == name)
+            ).to(DEVICE)]
         }
-        
+        # Simpler equivalent:
+        global_params = {}
+        for (name, _), value in zip(self.model.named_parameters(), parameters):
+            global_params[name] = torch.tensor(value).to(DEVICE).detach().clone()
+
         result = train(self.model, self.trainloader, global_params, self.criterion)
-        print(f"[Client {self.client_id}] Acc: {result['accuracy']:.4f} | Loss: {result['loss']:.4f}")
+        print(f"[Client {self.client_id}] Acc: {result['accuracy']:.4f} | Loss: {result['loss']:.4f} | Time: {result['time']:.1f}s")
 
-        os.makedirs("models/clients", exist_ok=True)
-        model_path = f"models/clients/client{self.client_id}_round{round_num}.pth"
-        torch.save(self.model.state_dict(), model_path)
-
-        cid = upload_to_ipfs(model_path)
         params = self.get_parameters({})
+
         if is_faulty:
             params = corrupt_parameters(params)
-            print("💣 Sent corrupted update")
+            print(f"[Client {self.client_id}] 💣 Sent corrupted update")
 
         proof = generate_proof(params)
         proof_str = json.dumps(proof)
-        proof_hash = hashlib.sha256((proof_str + cid).encode()).hexdigest()
-        try:
-            tx_hash = submit_update(round_num, self.client_id, cid, proof_hash, result["accuracy"])
-            print("TX:", tx_hash)
-        except Exception as e:
-            print("Blockchain error:", e)
+        proof_hash = hashlib.sha256((proof_str).encode()).hexdigest()
+
+        # Save model only every 5 rounds to reduce disk I/O
+        # (was saving every round × 5 clients = 250 writes for 50 rounds)
+        if round_num % 5 == 0:
+            os.makedirs("models/clients", exist_ok=True)
+            model_path = f"models/clients/client{self.client_id}_round{round_num}.pth"
+            torch.save(self.model.state_dict(), model_path)
+
+            # IPFS upload + blockchain submit off the critical path
+            threading.Thread(
+                target=_upload_async,
+                args=(model_path, round_num, self.client_id, proof_hash, result["accuracy"]),
+                daemon=True
+            ).start()
+            cid = "async"
+        else:
+            cid = "skipped"
 
         metrics = {
             "client_id": self.client_id,

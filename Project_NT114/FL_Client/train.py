@@ -68,14 +68,13 @@ def train(model, trainloader, global_params, criterion):
             output = model(data)
             loss = criterion(output, target)
 
-            # ==============================
-            # 🔥 FEDPROX (giảm tần suất + vector hóa)
-            # ==============================
+            # FedProx — computed every 5 batches to reduce overhead
             if batch_idx % 5 == 0:
-                prox_term = 0.0
-                for name, w in model.named_parameters():
-                    if name in global_param_dict:
-                        prox_term += torch.sum((w - global_param_dict[name]) ** 2)
+                prox_term = sum(
+                    torch.sum((w - global_param_dict[name]) ** 2)
+                    for name, w in model.named_parameters()
+                    if name in global_param_dict
+                )
             else:
                 prox_term = 0.0
 
