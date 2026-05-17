@@ -1,14 +1,17 @@
 # ================== train.py ==================
 import torch
 import time
+import os
 
-DEVICE = torch.device("cpu")   
+# Use the same device detection as Flower.py for consistency
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MU = 0.001
 LR = 0.0005
 EPOCHS = 2
 
-torch.set_num_threads(8)       
-torch.set_num_interop_threads(4)
+if DEVICE.type == "cpu":
+    torch.set_num_threads(8)       
+    torch.set_num_interop_threads(4)
 
 # def train(model, trainloader, _, criterion):
 #     optimizer = torch.optim.Adam(model.parameters(), lr=LR)

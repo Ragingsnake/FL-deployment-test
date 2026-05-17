@@ -52,12 +52,14 @@ def load_client_data(client_id, split_type="non_iid", batch_size=256):  # was 12
         generator=generator
     )
 
+    # Use pin_memory for GPU training; avoid multiprocessing fork conflicts in gRPC
+    use_cuda = torch.cuda.is_available()
     trainloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
-        persistent_workers=True,
+        num_workers=0,  # Disable multiprocessing to avoid fork() conflicts with gRPC
+        pin_memory=use_cuda,  # Use pinned memory for GPU transfers instead
         prefetch_factor=2
     )
 
@@ -65,8 +67,8 @@ def load_client_data(client_id, split_type="non_iid", batch_size=256):  # was 12
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
-        persistent_workers=True,
+        num_workers=0,  # Disable multiprocessing to avoid fork() conflicts with gRPC
+        pin_memory=use_cuda,  # Use pinned memory for GPU transfers instead
         prefetch_factor=2
     )
 
