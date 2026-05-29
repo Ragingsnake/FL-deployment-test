@@ -23,7 +23,7 @@ kubectl -n "$NAMESPACE" exec "$POD" -- find /app -name "plot_results.py" -o -nam
 
 echo ""
 echo "==> Listing Python files in /app..."
-kubectl -n "$NAMESPACE" exec "$POD" -- ls -la /app/*.py
+kubectl -n "$NAMESPACE" exec "$POD" -- find /app -maxdepth 1 -name "*.py" -exec ls -la {} +
 
 echo ""
 echo "==> Checking what's currently in /app/picture..."
@@ -32,6 +32,16 @@ kubectl -n "$NAMESPACE" exec "$POD" -- ls -laR /app/picture
 echo ""
 echo "==> Looking for any existing PNG files..."
 kubectl -n "$NAMESPACE" exec "$POD" -- find /app -name "*.png" -type f 2>/dev/null || echo "No PNG files found"
+
+echo ""
+echo "==> Checking /app/history (expected by plot_results.py)..."
+# list history directory recursively if it exists, otherwise note missing
+kubectl -n "$NAMESPACE" exec "$POD" -- test -d /app/history && \
+  kubectl -n "$NAMESPACE" exec "$POD" -- ls -laR /app/history || \
+  echo "No /app/history directory found in the pod"
+
+# look specifically for any server_history JSON files
+kubectl -n "$NAMESPACE" exec "$POD" -- find /app/history -maxdepth 2 -name "server_history*.json" -print 2>/dev/null || echo "No server_history JSON files found in /app/history"
 
 echo ""
 echo "==> Checking if plot_results.py exists and running it..."
@@ -55,7 +65,7 @@ else
   echo "❌ plot_results.py not found"
   echo ""
   echo "Available Python files:"
-  kubectl -n "$NAMESPACE" exec "$POD" -- ls -1 /app/*.py
+  kubectl -n "$NAMESPACE" exec "$POD" -- find /app -maxdepth 1 -name "*.py" -exec basename {} \; | sort
 
   echo ""
   echo "Searching for plotting code in source files..."

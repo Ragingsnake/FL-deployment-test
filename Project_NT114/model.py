@@ -5,22 +5,22 @@ import torch.nn.functional as F
 class CNN(nn.Module):
     def __init__(self, num_classes=62):
         super(CNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 48, kernel_size=5, padding=2)
-        self.bn1 = nn.BatchNorm2d(48)
-        self.conv2 = nn.Conv2d(48, 96, kernel_size=5, padding=2)
-        self.bn2 = nn.BatchNorm2d(96)
-        self.conv3 = nn.Conv2d(96, 192, kernel_size=5, padding=2)
-        self.bn3 = nn.BatchNorm2d(192)
+        self.conv1 = nn.Conv2d(1, 24, kernel_size=5, padding=2)
+        self.bn1 = nn.BatchNorm2d(24)
+        self.conv2 = nn.Conv2d(24, 48, kernel_size=5, padding=2)
+        self.bn2 = nn.BatchNorm2d(48)
+        self.conv3 = nn.Conv2d(48, 96, kernel_size=5, padding=2)
+        self.bn3 = nn.BatchNorm2d(96)
         self.dropout1 = nn.Dropout2d(0.25)
-        self.dropout2 = nn.Dropout(0.5)
+        self.dropout2 = nn.Dropout(0.35)
 
         dummy = torch.zeros(1, 1, 28, 28)
         dummy = self._forward_conv(dummy)
         flatten_size = dummy.view(1, -1).size(1)
         self.flatten_size = flatten_size
 
-        self.fc1 = nn.Linear(self.flatten_size, 512)
-        self.fc2 = nn.Linear(512, num_classes)
+        self.fc1 = nn.Linear(self.flatten_size, 256)
+        self.fc2 = nn.Linear(256, num_classes)
 
     def _forward_conv(self, x):
         x = self.bn1(F.relu(self.conv1(x)))

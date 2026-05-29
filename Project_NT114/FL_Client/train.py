@@ -1,14 +1,17 @@
 # ================== train.py ==================
 import torch
 import time
+import os
 
-DEVICE = torch.device("cpu")   
 MU = 0.005  # FIXED: Increased from 0.001 for stronger regularization
 LR = 0.001  # FIXED: Increased from 0.0005 to help clients learn more locally
-EPOCHS = 3  # FIXED: Increased from 2 to give clients more training time
 
-torch.set_num_threads(8)       
-torch.set_num_interop_threads(4)
+EPOCHS = int(os.environ.get("LOCAL_EPOCHS", "1"))
+NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
+NUM_INTEROP_THREADS = int(os.environ.get("TORCH_NUM_INTEROP_THREADS", "1"))
+
+torch.set_num_threads(NUM_THREADS)
+torch.set_num_interop_threads(NUM_INTEROP_THREADS)
 
 # def train(model, trainloader, _, criterion):
 #     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
@@ -43,6 +46,7 @@ torch.set_num_interop_threads(4)
 def train(model, trainloader, global_params, criterion):
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     model.train()
+    device = next(model.parameters()).device
 
     total_loss, correct, total = 0.0, 0, 0
     start_time = time.time()
@@ -62,7 +66,7 @@ def train(model, trainloader, global_params, criterion):
     for _ in range(EPOCHS):
         for batch_idx, (data, target) in enumerate(trainloader):
 
-            data, target = data.to(DEVICE), target.to(DEVICE)
+            data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
 
             output = model(data)

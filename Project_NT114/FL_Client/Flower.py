@@ -91,7 +91,10 @@ class FlowerClient(fl.client.NumPyClient):
         proof_hash = hashlib.sha256((proof_str + cid).encode()).hexdigest()
         try:
             tx_hash = submit_update(round_num, self.client_id, cid, proof_hash, result["accuracy"])
-            print("TX:", tx_hash)
+            if tx_hash:
+                print("TX:", tx_hash)
+            else:
+                print("TX skipped")
         except Exception as e:
             print("Blockchain error:", e)
 

@@ -10,6 +10,17 @@ spec:
     requests:
       storage: 5Gi
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: server-history
+  namespace: aggregation
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,10 +49,14 @@ spec:
                   key: REPUTATION_ADDRESS
           volumeMounts:
             - { name: outputs, mountPath: /app/picture }
+            - { name: history, mountPath: /app/history }
       volumes:
         - name: outputs
           persistentVolumeClaim:
             claimName: server-outputs
+        - name: history
+          persistentVolumeClaim:
+            claimName: server-history
 ---
 # Headless-ish service exposed across namespaces for clients to connect
 apiVersion: v1

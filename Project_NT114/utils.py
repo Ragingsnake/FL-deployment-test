@@ -5,7 +5,7 @@ import numpy as np
 
 CACHE = {}
 
-def load_client_data(client_id, split_type="non_iid", batch_size=128):
+def load_client_data(client_id, split_type="non_iid", batch_size=64):
     key = f"{split_type}_{client_id}"
     
     if key in CACHE:
@@ -56,18 +56,14 @@ def load_client_data(client_id, split_type="non_iid", batch_size=128):
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
-        persistent_workers=True,
-        prefetch_factor=2 
+        num_workers=0
     )
     
     testloader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
-        persistent_workers=True,
-        prefetch_factor=2 
+        num_workers=0
     )
     
     CACHE[key] = (trainloader, testloader)

@@ -1,13 +1,13 @@
 # ================== evaluate.py ==================
 import torch
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def evaluate(model, testloader, criterion):
     model.eval()
+    device = next(model.parameters()).device
     correct, total, loss = 0, 0, 0.0
     with torch.no_grad():
         for data, target in testloader:
-            data, target = data.to(DEVICE), target.to(DEVICE)
+            data, target = data.to(device), target.to(device)
             output = model(data)
             loss += criterion(output, target).item()
             pred = torch.argmax(output, dim=1)

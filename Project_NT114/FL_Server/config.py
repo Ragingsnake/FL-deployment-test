@@ -1,4 +1,4 @@
-ROUNDS = 50
+ROUNDS = 35
 NUM_CLIENTS = 5
 
 # FIXED: Reduced FedAdam learning rate to prevent oscillations
