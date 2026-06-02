@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+# LOL
 class CNN(nn.Module):
     def __init__(self, num_classes=62):
         super(CNN, self).__init__()
