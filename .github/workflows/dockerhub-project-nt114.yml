@@ -1,0 +1,82 @@
+name: Build Project_NT114 Docker Images
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "Project_NT114/**"
+      - "deployment/docker/**"
+      - "deployment/scripts/build_and_push_dockerhub.sh"
+      - ".github/workflows/dockerhub-project-nt114.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(
+            git tag --list 'ver[0-9]*' |
+            sed -E 's/^ver([0-9]+)$/\1/' |
+            sort -n |
+            tail -1
+          )"
+          if [ -z "$latest" ]; then
+            next=1
+          else
+            next=$((latest + 1))
+          fi
+          echo "tag=ver${next}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Docker build context
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf Project_NT114/deployment
+          cp -R deployment Project_NT114/deployment
+          cp deployment/docker/requirements.txt Project_NT114/requirements.txt
+          chmod +x deployment/scripts/build_and_push_dockerhub.sh
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push images
+        shell: bash
+        env:
+          DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo="${$DOCKERHUB_USERNAME}"
+          cd Project_NT114
+          ../deployment/scripts/build_and_push_dockerhub.sh "$repo" "$TAG" linux/amd64
+
+      - name: Push version tag
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"

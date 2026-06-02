@@ -5,29 +5,21 @@ import torch.nn.functional as F
 class CNN(nn.Module):
     def __init__(self, num_classes=62):
         super(CNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 24, kernel_size=5, padding=2)
-        self.bn1 = nn.BatchNorm2d(24)
-        self.conv2 = nn.Conv2d(24, 48, kernel_size=5, padding=2)
-        self.bn2 = nn.BatchNorm2d(48)
-        self.conv3 = nn.Conv2d(48, 96, kernel_size=5, padding=2)
-        self.bn3 = nn.BatchNorm2d(96)
+        self.conv1 = nn.Conv2d(1, 32, 3, 1)
+        self.conv2 = nn.Conv2d(32, 64, 3, 1)
         self.dropout1 = nn.Dropout2d(0.25)
-        self.dropout2 = nn.Dropout(0.35)
+        self.dropout2 = nn.Dropout(0.5)
 
         dummy = torch.zeros(1, 1, 28, 28)
         dummy = self._forward_conv(dummy)
         flatten_size = dummy.view(1, -1).size(1)
-        self.flatten_size = flatten_size
 
-        self.fc1 = nn.Linear(self.flatten_size, 256)
-        self.fc2 = nn.Linear(256, num_classes)
+        self.fc1 = nn.Linear(flatten_size, 128)
+        self.fc2 = nn.Linear(128, num_classes)
 
     def _forward_conv(self, x):
-        x = self.bn1(F.relu(self.conv1(x)))
-        x = F.max_pool2d(x, 2)
-        x = self.bn2(F.relu(self.conv2(x)))
-        x = F.max_pool2d(x, 2)
-        x = self.bn3(F.relu(self.conv3(x)))
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
         x = F.max_pool2d(x, 2)
         x = self.dropout1(x)
         return x

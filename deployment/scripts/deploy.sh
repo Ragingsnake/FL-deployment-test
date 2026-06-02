@@ -13,6 +13,7 @@ ACR_NAME="${ACR_NAME:-flacr$RANDOM}"          # must be globally unique
 NODE_COUNT="${NODE_COUNT:-3}"
 NODE_SIZE="${NODE_SIZE:-Standard_B2as_v2}"
 TAG="${TAG:-v1}"
+SPLIT_TYPE="${SPLIT_TYPE:-non_iid}"
 REPO_URL="${REPO_URL:-https://github.com/anhkiet-dao/Project_NT114.git}"
 WORKDIR="${WORKDIR:-$PWD/Project_NT114}"
 # ---------------------------------------------
@@ -30,7 +31,7 @@ az aks  create -n "$AKS_NAME" -g "$RESOURCE_GROUP" \
 
 az aks get-credentials -n "$AKS_NAME" -g "$RESOURCE_GROUP" --overwrite-existing
 REGISTRY="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
-export REGISTRY TAG
+export REGISTRY TAG SPLIT_TYPE
 
 echo "==> 3/8 Prepare source (clone fresh)"
 if [ -d "$WORKDIR" ]; then
@@ -58,7 +59,7 @@ az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerf
 echo "==> 6/8 Render manifests with REGISTRY/TAG and apply"
 mkdir -p /tmp/k8s-rendered
 for f in deployment/k8s/*.yaml; do
-  envsubst '$REGISTRY $TAG' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
+  envsubst '$REGISTRY $TAG $SPLIT_TYPE' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
 done
 kubectl apply -f /tmp/k8s-rendered/00-namespaces.yaml
 kubectl apply -f /tmp/k8s-rendered/10-ipfs.yaml

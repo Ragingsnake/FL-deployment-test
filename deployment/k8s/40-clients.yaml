@@ -23,7 +23,7 @@ spec:
             # CLIENT_ID derives from StatefulSet ordinal (pod name ends with -0..-4)
             - name: CLIENT_ID_RAW
               value: "$(POD_NAME)"
-            - { name: SPLIT_TYPE, value: "non_iid" }
+            - { name: SPLIT_TYPE, value: "${SPLIT_TYPE}" }
             - { name: FL_SERVER_HOST, value: "fl-server-svc.aggregation.svc.cluster.local" }
             - { name: FL_SERVER_PORT, value: "8080" }
             - { name: IPFS_API, value: "/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001" }

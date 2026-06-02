@@ -23,7 +23,7 @@ set -euo pipefail
 # (hoặc chạy thủ công: docker build / docker push; nhớ docker login trước)
 
 # Build local images and push to Docker Hub
-# Usage: build_and_push_dockerhub.sh DOCKERHUB_REPO [TAG] [PLATFORM]
+# Usage: build_and_push_dockerhub.sh DOCKERHUB_NAME [TAG] [PLATFORM]
 # Example: ./build_and_push_dockerhub.sh myuser v1 linux/amd64
 
 DOCKERHUB_REPO="${1:-}" 

@@ -3,12 +3,14 @@ import torch
 import time
 import os
 
-MU = 0.005  # FIXED: Increased from 0.001 for stronger regularization
-LR = 0.001  # FIXED: Increased from 0.0005 to help clients learn more locally
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-EPOCHS = int(os.environ.get("LOCAL_EPOCHS", "1"))
-NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
-NUM_INTEROP_THREADS = int(os.environ.get("TORCH_NUM_INTEROP_THREADS", "1"))
+MU = float(os.environ.get("FEDPROX_MU", "0.001"))
+LR = float(os.environ.get("CLIENT_LR", "0.0005"))
+EPOCHS = int(os.environ.get("LOCAL_EPOCHS", "2"))
+PROX_EVERY_N_BATCHES = int(os.environ.get("FEDPROX_EVERY_N_BATCHES", "5"))
+NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "8"))
+NUM_INTEROP_THREADS = int(os.environ.get("TORCH_NUM_INTEROP_THREADS", "4"))
 
 torch.set_num_threads(NUM_THREADS)
 torch.set_num_interop_threads(NUM_INTEROP_THREADS)
@@ -46,19 +48,18 @@ torch.set_num_interop_threads(NUM_INTEROP_THREADS)
 def train(model, trainloader, global_params, criterion):
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     model.train()
-    device = next(model.parameters()).device
 
     total_loss, correct, total = 0.0, 0, 0
     start_time = time.time()
 
-    # Keep only trainable parameters, keyed by name, to avoid buffer/shape mismatches.
     if isinstance(global_params, dict):
-        global_param_dict = global_params
+        global_param_list = [
+            global_params[name]
+            for name, _ in model.named_parameters()
+            if name in global_params
+        ]
     else:
-        global_param_dict = {
-            name: tensor
-            for (name, _), tensor in zip(model.named_parameters(), global_params)
-        }
+        global_param_list = list(global_params or [])
 
     # ==============================
     # TRAINING LOOP
@@ -66,19 +67,22 @@ def train(model, trainloader, global_params, criterion):
     for _ in range(EPOCHS):
         for batch_idx, (data, target) in enumerate(trainloader):
 
-            data, target = data.to(device), target.to(device)
+            data, target = data.to(DEVICE), target.to(DEVICE)
             optimizer.zero_grad()
 
             output = model(data)
             loss = criterion(output, target)
 
             # ==============================
-            # 🔥 FEDPROX (now applied to ALL batches for consistent regularization)
+            # FEDPROX (reduced frequency for the upstream fast-training profile)
             # ==============================
-            prox_term = 0.0
-            for name, w in model.named_parameters():
-                if name in global_param_dict:
-                    prox_term += torch.sum((w - global_param_dict[name]) ** 2)
+            if global_param_list and batch_idx % PROX_EVERY_N_BATCHES == 0:
+                prox_term = 0.0
+                for w, w_t in zip(model.parameters(), global_param_list):
+                    w_t = w_t.to(w.device)
+                    prox_term += torch.sum((w - w_t) ** 2)
+            else:
+                prox_term = 0.0
 
             loss = loss + (MU / 2) * prox_term
 

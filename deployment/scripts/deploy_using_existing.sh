@@ -11,6 +11,7 @@ ACR_NAME="${ACR_NAME:-flacr$RANDOM}"
 NODE_COUNT="${NODE_COUNT:-3}"
 NODE_SIZE="${NODE_SIZE:-Standard_B2as_v2}"
 TAG="${TAG:-v1}"
+SPLIT_TYPE="${SPLIT_TYPE:-non_iid}"
 WORKDIR="${1:-$PWD/Project_NT114}"
 
 if [ ! -d "$WORKDIR" ]; then
@@ -31,7 +32,7 @@ az aks  create -n "$AKS_NAME" -g "$RESOURCE_GROUP" \
 
 az aks get-credentials -n "$AKS_NAME" -g "$RESOURCE_GROUP" --overwrite-existing
 REGISTRY="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
-export REGISTRY TAG
+export REGISTRY TAG SPLIT_TYPE
 
 # Drop our deployment overlay into the source tree so Dockerfiles can find it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,7 +49,7 @@ az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerf
 echo "==> 4/6 Render manifests with REGISTRY/TAG and apply"
 mkdir -p /tmp/k8s-rendered
 for f in deployment/k8s/*.yaml; do
-  envsubst '$REGISTRY $TAG' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
+  envsubst '$REGISTRY $TAG $SPLIT_TYPE' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
 done
 kubectl apply -f /tmp/k8s-rendered/00-namespaces.yaml
 kubectl apply -f /tmp/k8s-rendered/10-ipfs.yaml

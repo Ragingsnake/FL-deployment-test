@@ -1,8 +1,9 @@
-ROUNDS = 35
+import os
+
+ROUNDS = int(os.environ.get("FL_ROUNDS", "25"))
 NUM_CLIENTS = 5
 
-# FIXED: Reduced FedAdam learning rate to prevent oscillations
-LR = 0.0002  # was 0.0007 - too aggressive, caused 0.32 → 0.68 jumps
+LR = float(os.environ.get("FEDADAM_LR", "0.0007"))
 BETA1 = 0.9
 BETA2 = 0.99
 EPS = 1e-8

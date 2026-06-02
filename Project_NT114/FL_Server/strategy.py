@@ -17,6 +17,11 @@ from FL_Server.defense import compute_delta
 from FL_Server.fedadam import fedadam_update
 
 os.makedirs("history", exist_ok=True)
+SPLIT_TYPE = os.environ.get("SPLIT_TYPE", "non_iid")
+HISTORY_PATH = os.environ.get(
+    "HISTORY_PATH",
+    f"history/server_history_fedadam_{SPLIT_TYPE}.json",
+)
 
 
 class SecureFLStrategy(fl.server.strategy.FedAvg):
@@ -228,8 +233,8 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             self.history["global"]["round_time"].append(float(round_duration))
 
         try:
-            with open("history/server_history_fedadam.json", 
-                      "w", 
+            with open(HISTORY_PATH,
+                      "w",
                       encoding="utf-8"
             ) as f:
                 json.dump(self.history, f, indent=4)

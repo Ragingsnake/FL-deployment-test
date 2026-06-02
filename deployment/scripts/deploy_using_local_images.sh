@@ -12,6 +12,7 @@ ACR_NAME="${ACR_NAME:-flacr$RANDOM}"
 NODE_COUNT="${NODE_COUNT:-3}"
 NODE_SIZE="${NODE_SIZE:-Standard_B2as_v2}"
 TAG="${1:-${TAG:-v1}}"
+SPLIT_TYPE="${SPLIT_TYPE:-non_iid}"
 IMAGE_DIR="${2:-./image-cache}"
 DOCKERHUB_REPO="${3:-${DOCKERHUB_REPO:-}}"
 REPO_URL="${REPO_URL:-https://github.com/anhkiet-dao/Project_NT114.git}"
@@ -33,7 +34,7 @@ az aks  create -n "$AKS_NAME" -g "$RESOURCE_GROUP" \
 
 az aks get-credentials -n "$AKS_NAME" -g "$RESOURCE_GROUP" --overwrite-existing
 REGISTRY="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
-export REGISTRY TAG
+export REGISTRY TAG SPLIT_TYPE
 
 echo "==> 3/7 Prepare source (clone if needed)"
 if [ ! -d "$WORKDIR" ]; then
@@ -69,7 +70,7 @@ fi
 echo "==> 6/7 Render manifests and apply"
 mkdir -p /tmp/k8s-rendered
 for f in deployment/k8s/*.yaml; do
-  envsubst '$REGISTRY $TAG' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
+  envsubst '$REGISTRY $TAG $SPLIT_TYPE' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
   if [ -n "$DOCKERHUB_REPO" ]; then
     # force images to point to Docker Hub repo
     sed -i -E "s|image:\s+.*/([a-zA-Z0-9_\-]+):${TAG}|image: ${DOCKERHUB_REPO}/\1:${TAG}|g" "/tmp/k8s-rendered/$(basename "$f")"
