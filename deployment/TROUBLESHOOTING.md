@@ -92,6 +92,7 @@ kubectl -n ipfs exec -it ipfs-0 -- ipfs repo stat
 | Geth pod restarts | PVC corrupted from forced delete | delete the PVC `geth-data` and re-apply (you lose chain state) |
 | `ImagePullBackOff` | ACR not attached to AKS | `az aks update -g fl-rg -n fl-aks --attach-acr $ACR_NAME` |
 | ZKP verification fails for every client | `zkp-node` unavailable, mismatched proof backend, or stale client/server image | Check `kubectl -n blockchain logs deploy/zkp-node`, confirm `ZKP_NODE_URL` on server/clients, rebuild all four images with the same tag |
+| Round 1 ZKP passes, then every client fails ZKP from round 2 onward | Client proofs were generated with `round=1` because the server did not send `server_round` in Flower fit config | Rebuild/redeploy images containing the `SecureFLStrategy.configure_fit` fix; client model paths should become `clientX_round2.pth`, `clientX_round3.pth`, etc. |
 
 ---
 
@@ -154,6 +155,92 @@ az storage blob upload-batch -d results -s ~/fl-outputs --account-name <yoursa>
 ---
 
 ## 6. Re-running an experiment cleanly
+
+### Demo case A: faulty client affects aggregation
+
+This demo makes one client send a validly signed/proved but poisoned model
+update. The ZKP should still pass, because the proof matches the submitted
+parameters. The defense/reputation layer should then react to the abnormal
+update.
+
+Use a short run first:
+
+```bash
+# Configure the server to mark client 2 faulty for rounds 2..4.
+kubectl -n aggregation set env deploy/fl-server \
+  FL_ROUNDS=6 \
+  DEMO_FAULTY_CLIENTS=2 \
+  DEMO_FAULTY_START_ROUND=2 \
+  DEMO_FAULTY_END_ROUND=4 \
+  DEMO_FAULTY_NOISE_SCALE=0.25
+
+kubectl -n aggregation rollout restart deploy/fl-server
+kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+
+# Re-run the clients against the restarted server.
+kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
+kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
+kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
+
+kubectl -n aggregation logs -f deploy/fl-server
+```
+
+Expected signs:
+
+- Client log includes `Client 2 is FAULTY` and `Sent corrupted update`.
+- Server log still shows blockchain/ZKP verification passing for client 2.
+- Server defense output should show a larger delta, lower score/reputation, or
+  a skipped/outlier client depending on the round.
+
+Clean the demo variables afterward:
+
+```bash
+kubectl -n aggregation set env deploy/fl-server \
+  DEMO_FAULTY_CLIENTS- \
+  DEMO_FAULTY_START_ROUND- \
+  DEMO_FAULTY_END_ROUND- \
+  DEMO_FAULTY_NOISE_SCALE-
+```
+
+### Demo case B: invalid ZKP nullifies a client update
+
+This demo makes one client train normally, then intentionally tampers with its
+proof before sending the update. The server should reject that client before
+aggregation and penalize reputation.
+
+```bash
+kubectl -n aggregation set env deploy/fl-server \
+  FL_ROUNDS=6 \
+  DEMO_BAD_ZKP_CLIENTS=3 \
+  DEMO_BAD_ZKP_START_ROUND=2 \
+  DEMO_BAD_ZKP_END_ROUND=4
+
+kubectl -n aggregation rollout restart deploy/fl-server
+kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+
+kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
+kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
+kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
+
+kubectl -n aggregation logs -f deploy/fl-server
+```
+
+Expected signs:
+
+- Client log includes `will send an INVALID ZKP proof` and
+  `Sent intentionally invalid ZKP proof`.
+- Server log includes `ZKP FAILED for Client 3`.
+- Client 3 is added to `penalty_clients` in the history JSON and is excluded
+  from that round's aggregation.
+
+Clean the demo variables afterward:
+
+```bash
+kubectl -n aggregation set env deploy/fl-server \
+  DEMO_BAD_ZKP_CLIENTS- \
+  DEMO_BAD_ZKP_START_ROUND- \
+  DEMO_BAD_ZKP_END_ROUND-
+```
 
 ### Run IID after a completed non-IID run
 

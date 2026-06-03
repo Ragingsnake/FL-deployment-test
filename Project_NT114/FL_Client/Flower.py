@@ -13,6 +13,25 @@ from FL_Client.faulty import is_faulty_client, corrupt_parameters
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+def _parse_client_ids(value):
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        return {int(v) for v in value}
+    value = str(value).strip()
+    if not value:
+        return set()
+    return {int(v.strip()) for v in value.split(",") if v.strip()}
+
+
+def _tamper_proof(proof):
+    bad_proof = dict(proof)
+    bad_statement = dict(bad_proof.get("statement", {}))
+    bad_statement["model_hash"] = "invalid-demo-proof"
+    bad_proof["statement"] = bad_statement
+    return bad_proof
+
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self, client_id, split_type):
         self.client_id = client_id
@@ -60,12 +79,16 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
         round_num = config.get("server_round", 1)
         
-        faulty_clients = config.get("faulty_clients", [])
+        faulty_clients = _parse_client_ids(config.get("demo_faulty_clients", ""))
+        bad_zkp_clients = _parse_client_ids(config.get("demo_bad_zkp_clients", ""))
 
         is_faulty = self.client_id in faulty_clients
+        is_bad_zkp = self.client_id in bad_zkp_clients
         
         if is_faulty:
             print(f"⚠ Client {self.client_id} is FAULTY")
+        if is_bad_zkp:
+            print(f"⚠ Client {self.client_id} will send an INVALID ZKP proof")
         trainable_names = {name for name, _ in self.model.named_parameters()}
         global_params = {
             name: torch.from_numpy(value).to(DEVICE).detach().clone()
@@ -83,10 +106,14 @@ class FlowerClient(fl.client.NumPyClient):
         cid = upload_to_ipfs(model_path)
         params = self.get_parameters({})
         if is_faulty:
-            params = corrupt_parameters(params)
+            params = corrupt_parameters(params, config.get("demo_faulty_noise_scale", 0.01))
             print("💣 Sent corrupted update")
 
         proof = generate_proof(params, client_id=self.client_id, round_num=round_num, cid=cid)
+        if is_bad_zkp:
+            proof = _tamper_proof(proof)
+            print("🧪 Sent intentionally invalid ZKP proof")
+
         proof_str = canonical_proof_json(proof)
         try:
             tx_hash = submit_update(round_num, self.client_id, cid, proof_hash(proof), result["accuracy"])

@@ -70,6 +70,18 @@ Groth16 or Plonk proof generation/verification. The FL clients, aggregator,
 IPFS, and geth contract flow do not need to change as long as the ZKP node keeps
 the same HTTP contract.
 
+## Demo controls
+
+The server sends demo flags to clients through Flower fit config:
+
+| Demo | Server env vars |
+|------|-----------------|
+| Faulty client / poisoned update | `DEMO_FAULTY_CLIENTS=2`, optional `DEMO_FAULTY_START_ROUND=2`, `DEMO_FAULTY_END_ROUND=4`, `DEMO_FAULTY_NOISE_SCALE=0.25` |
+| Invalid ZKP proof / rejected update | `DEMO_BAD_ZKP_CLIENTS=3`, optional `DEMO_BAD_ZKP_START_ROUND=2`, `DEMO_BAD_ZKP_END_ROUND=4` |
+
+See `deployment/TROUBLESHOOTING.md` for exact `kubectl set env` demo commands
+and expected log lines.
+
 ## Things you may still need
 
 | Concern | Detail |

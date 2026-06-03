@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 TOTAL_CLIENTS = 5
 LAMBDA = 1 
@@ -31,12 +32,16 @@ def is_faulty_client(client_id, round_num):
 
     return client_id in faulty_clients
 
-def corrupt_parameters(params):
+def corrupt_parameters(params, noise_scale=None):
+    if noise_scale is None:
+        noise_scale = float(os.environ.get("DEMO_FAULTY_NOISE_SCALE", "0.01"))
+    else:
+        noise_scale = float(noise_scale)
 
     corrupted = []
 
     for p in params:
-        noise = np.random.normal(0, 0.01, p.shape)
+        noise = np.random.normal(0, noise_scale, p.shape)
 
         corrupted.append(p + noise)
 
