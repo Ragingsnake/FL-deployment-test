@@ -1,309 +1,227 @@
+import argparse
 import json
-import matplotlib.pyplot as plt
-import numpy as np
 import os
 
-IID_FILE = "history/server_history_fedadam_iid.json"
-NONIID_FILE = "history/server_history_fedadam_non_iid.json"
+import matplotlib.pyplot as plt
+import numpy as np
 
-SAVE_DIR = "plots/comparison"
-os.makedirs(SAVE_DIR, exist_ok=True)
 
-with open(IID_FILE, "r") as f:
-    iid = json.load(f)
+def load_history(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-with open(NONIID_FILE, "r") as f:
-    noniid = json.load(f)
 
-rounds_iid = iid["global"]["round"]
-rounds_noniid = noniid["global"]["round"]
+def align(*series):
+    n = min(len(s) for s in series)
+    return [s[:n] for s in series]
 
-plt.style.use("seaborn-v0_8-whitegrid")
 
-plt.rcParams.update({
-    "font.size": 12,
-    "axes.labelweight": "bold",
-    "axes.titleweight": "bold"
-})
+def sorted_clients(history):
+    clients = history.get("clients", {})
+    return sorted(clients.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x))
 
-def compute_avg_local_accuracy(data):
-    clients = data["clients"]
-    rounds = data["global"]["round"]
 
-    avg_acc = []
+def client_metric(client_data, *names):
+    for name in names:
+        if name in client_data:
+            return client_data[name]
+    return []
 
+
+def avg_client_series(history, *metric_names):
+    rounds = history.get("global", {}).get("round", [])
+    clients = history.get("clients", {})
+    values = []
     for i in range(len(rounds)):
-        accs = []
+        per_client = []
+        for cid in sorted_clients(history):
+            series = client_metric(clients[cid], *metric_names)
+            if i < len(series):
+                per_client.append(series[i])
+        values.append(float(np.mean(per_client)) if per_client else np.nan)
+    return values
 
-        for cid in clients:
-            accs.append(clients[cid]["test_accuracy"][i])
 
-        avg_acc.append(np.mean(accs))
-
-    return avg_acc
-
-
-def avg_train_time(data):
-
+def avg_train_time(history):
     times = []
-
-    for cid in data["clients"]:
-        times.extend(data["clients"][cid]["train_time"])
-
-    return np.mean(times)
+    for cid in sorted_clients(history):
+        times.extend(history["clients"][cid].get("train_time", []))
+    return float(np.mean(times)) if times else 0.0
 
 
-# ======================================================
-# 1️⃣ GLOBAL ACCURACY COMPARISON
-# ======================================================
-plt.figure(figsize=(10,5))
-
-plt.plot(rounds_iid, iid["global"]["accuracy"],
-         marker="o", linewidth=2, label="IID")
-
-plt.plot(rounds_noniid, noniid["global"]["accuracy"],
-         marker="s", linewidth=2, label="Non-IID")
-
-plt.title("Global Accuracy: IID vs Non-IID")
-plt.xlabel("Communication Round")
-plt.ylabel("Accuracy")
-plt.ylim(0,1)
-
-plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-plt.tight_layout()
-
-plt.savefig(f"{SAVE_DIR}/compare_global_accuracy.png", dpi=300)
-plt.close()
-
-
-# ======================================================
-# 2️⃣ GLOBAL LOSS COMPARISON
-# ======================================================
-plt.figure(figsize=(10,5))
-
-plt.plot(rounds_iid, iid["global"]["loss"],
-         marker="o", linewidth=2, label="IID")
-
-plt.plot(rounds_noniid, noniid["global"]["loss"],
-         marker="s", linewidth=2, label="Non-IID")
-
-plt.title("Global Loss: IID vs Non-IID")
-plt.xlabel("Communication Round")
-plt.ylabel("Loss")
-
-plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-plt.tight_layout()
-
-plt.savefig(f"{SAVE_DIR}/compare_global_loss.png", dpi=300)
-plt.close()
-
-# ======================================================
-# 3️⃣ ROUND TIME COMPARISON (Sửa để tránh KeyError)
-# ======================================================
-if "round_time" in iid["global"] and "round_time" in noniid["global"]:
-    plt.figure(figsize=(8,5))
-    plt.plot(rounds_iid, iid["global"]["round_time"], marker="o", linewidth=2, label="IID")
-    plt.plot(rounds_noniid, noniid["global"]["round_time"], marker="s", linewidth=2, label="Non-IID")
-    plt.title("Round Time Comparison")
-    plt.xlabel("Communication Round")
-    plt.ylabel("Round Time (seconds)")
-    
-    plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-    plt.tight_layout()
-    
-    plt.savefig(f"{SAVE_DIR}/compare_round_time.png", dpi=300)
-    plt.close()
-else:
-    print("⚠️ Bỏ qua biểu đồ 3: Một trong các file thiếu dữ liệu 'round_time'")
-
-# ======================================================
-# 4️⃣ TRAINING TIME COMPARISON
-# ======================================================
-iid_train = avg_train_time(iid)
-noniid_train = avg_train_time(noniid)
-
-plt.figure(figsize=(10,5))
-
-labels = ["IID", "Non-IID"]
-values = [iid_train, noniid_train]
-
-plt.bar(labels, values)
-
-plt.title("Average Client Training Time")
-plt.ylabel("Seconds")
-
-plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-plt.tight_layout()
-
-plt.savefig(f"{SAVE_DIR}/compare_train_time.png", dpi=300)
-plt.close()
-
-# ======================================================
-# 5️⃣ AVERAGE REPUTATION PER ROUND
-# ======================================================
-
-def compute_avg_reputation(data):
-
-    rounds = data["global"]["round"]
-    clients = data["clients"]
-
-    avg_rep = []
-
+def avg_reputation(history):
+    rounds = history.get("global", {}).get("round", [])
+    clients = history.get("clients", {})
+    values = []
     for i in range(len(rounds)):
-
         reps = []
-
-        for cid in clients:
-            reps.append(clients[cid]["reputation"][i]["value"])
-
-        avg_rep.append(np.mean(reps))
-
-    return avg_rep
-
-
-iid_rep = compute_avg_reputation(iid)
-noniid_rep = compute_avg_reputation(noniid)
-
-plt.figure(figsize=(10,5))
-
-plt.plot(rounds_iid, iid_rep,
-         marker="o", linewidth=2, label="IID")
-
-plt.plot(rounds_noniid, noniid_rep,
-         marker="s", linewidth=2, label="Non-IID")
-
-plt.title("Average Client Reputation: IID vs Non-IID")
-plt.xlabel("Communication Round")
-plt.ylabel("Reputation Score")
-
-plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-plt.tight_layout()
-
-plt.savefig(f"{SAVE_DIR}/compare_reputation.png", dpi=300)
-plt.close()
-
-# ======================================================
-# 6️⃣ REPUTATION DISTRIBUTION ACROSS CLIENTS
-# ======================================================
-
-def collect_client_reputation(data):
-
-    rep_per_client = []
-
-    for cid in data["clients"]:
-        reps = []
-
-        for r in data["clients"][cid]["reputation"]:
-            reps.append(r["value"])
-
-        rep_per_client.append(reps)
-
-    return rep_per_client
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
-iid_rep_clients = collect_client_reputation(iid)
-noniid_rep_clients = collect_client_reputation(noniid)
-
-ax1.boxplot(iid_rep_clients)
-ax1.set_title("Reputation Score Distribution (IID)", fontsize=14, fontweight='bold')
-ax1.set_ylabel("Reputation Score")
-ax1.set_xticklabels([f"Client {i+1}" for i in range(len(iid_rep_clients))], rotation=45)
-ax1.grid(True, linestyle='--', alpha=0.6)
-
-ax2.boxplot(noniid_rep_clients)
-ax2.set_title("Reputation Score Distribution (Non-IID)", fontsize=14, fontweight='bold')
-ax2.set_xticklabels([f"Client {i+1}" for i in range(len(noniid_rep_clients))], rotation=45)
-ax2.grid(True, linestyle='--', alpha=0.6)
-
-plt.tight_layout()
-
-plt.savefig(f"{SAVE_DIR}/reputation_distribution_comparison.png", dpi=300)
-plt.close()
-
-#=======================================================
-# 7️⃣ VALID UPDATE RATE vs REJECTED UPDATE RATE
-#=======================================================
-
-TOTAL_CLIENTS = 5
-
-iid_penalty = iid["global"].get("penalty_clients", [])
-iid_penalty_count = [len(p) for p in iid_penalty]
-
-iid_rejected_rate = np.array(iid_penalty_count) / TOTAL_CLIENTS
-iid_valid_rate = 1 - iid_rejected_rate
-
-noniid_penalty = noniid["global"].get("penalty_clients", [])
-noniid_penalty_count = [len(p) for p in noniid_penalty]
-
-noniid_rejected_rate = np.array(noniid_penalty_count) / TOTAL_CLIENTS
-noniid_valid_rate = 1 - noniid_rejected_rate
+        for cid in sorted_clients(history):
+            reputation = clients[cid].get("reputation", [])
+            if i < len(reputation):
+                item = reputation[i]
+                reps.append(item.get("value", item) if isinstance(item, dict) else item)
+        values.append(float(np.mean(reps)) if reps else np.nan)
+    return values
 
 
-plt.figure(figsize=(10,5))
-
-bar_width = 0.35
-
-x_iid = np.arange(len(rounds_iid))
-x_noniid = np.arange(len(rounds_noniid)) + bar_width
-
-plt.bar(x_iid, iid_valid_rate, width=bar_width, label="IID Valid")
-plt.bar(x_iid, iid_rejected_rate, width=bar_width,
-        bottom=iid_valid_rate, label="IID Rejected")
-
-plt.bar(x_noniid, noniid_valid_rate, width=bar_width, label="Non-IID Valid")
-plt.bar(x_noniid, noniid_rejected_rate, width=bar_width,
-        bottom=noniid_valid_rate, label="Non-IID Rejected")
-
-plt.title("Valid vs Rejected Update Rate (Stacked Bar)")
-plt.xlabel("Communication Round")
-plt.ylabel("Rate")
-
-plt.xticks(x_iid + bar_width / 2, rounds_iid)
-
-plt.ylim(0, 1.05)
-
-plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-plt.tight_layout()
-
-plt.savefig(f"{SAVE_DIR}/compare_update_rate_bar.png", dpi=300)
-plt.close()
-
-# ======================================================
-# 8️⃣ MODEL CONVERGENCE SPEED
-# ======================================================
-
-def compute_accuracy_gain(acc_list):
-
-    gains = [0]  # round 1 không có round trước
-
-    for i in range(1, len(acc_list)):
-        gains.append(acc_list[i] - acc_list[i-1])
-
-    return gains
+def client_reputation_distribution(history):
+    values = []
+    for cid in sorted_clients(history):
+        reputation = history["clients"][cid].get("reputation", [])
+        series = [r.get("value", r) if isinstance(r, dict) else r for r in reputation]
+        if series:
+            values.append(series)
+    return values
 
 
-iid_gain = compute_accuracy_gain(iid["global"]["accuracy"])
-noniid_gain = compute_accuracy_gain(noniid["global"]["accuracy"])
+def save(path):
+    plt.tight_layout()
+    plt.savefig(path, dpi=300)
+    plt.close()
 
 
-plt.figure(figsize=(10,5))
+def plot_line_compare(rounds_iid, iid_values, rounds_non_iid, non_iid_values, title, ylabel, path, ylim=None):
+    x1, y1 = align(rounds_iid, iid_values)
+    x2, y2 = align(rounds_non_iid, non_iid_values)
+    plt.figure(figsize=(10, 5))
+    plt.plot(x1, y1, marker="o", linewidth=2, label="IID")
+    plt.plot(x2, y2, marker="s", linewidth=2, label="Non-IID")
+    plt.title(title)
+    plt.xlabel("Communication Round")
+    plt.ylabel(ylabel)
+    if ylim:
+        plt.ylim(*ylim)
+    plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
+    save(path)
 
-plt.plot(rounds_iid, iid_gain,
-         marker="o", linewidth=2, label="IID")
 
-plt.plot(rounds_noniid, noniid_gain,
-         marker="s", linewidth=2, label="Non-IID")
+def plot_comparison(iid, non_iid, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    plt.style.use("seaborn-v0_8-whitegrid")
+    plt.rcParams.update({"font.size": 12, "axes.labelweight": "bold", "axes.titleweight": "bold"})
 
-plt.axhline(0, linestyle="--") 
+    iid_global = iid.get("global", {})
+    non_iid_global = non_iid.get("global", {})
+    rounds_iid = iid_global.get("round", [])
+    rounds_non_iid = non_iid_global.get("round", [])
 
-plt.title("Model Convergence Speed (Accuracy Gain per Round)")
-plt.xlabel("Communication Round")
-plt.ylabel("Accuracy Gain")
+    plot_line_compare(
+        rounds_iid,
+        iid_global.get("accuracy", []),
+        rounds_non_iid,
+        non_iid_global.get("accuracy", []),
+        "Global Accuracy: IID vs Non-IID",
+        "Accuracy",
+        f"{output_dir}/compare_global_accuracy.png",
+        (0, 1),
+    )
 
-plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-plt.tight_layout()
+    plot_line_compare(
+        rounds_iid,
+        iid_global.get("loss", []),
+        rounds_non_iid,
+        non_iid_global.get("loss", []),
+        "Global Loss: IID vs Non-IID",
+        "Loss",
+        f"{output_dir}/compare_global_loss.png",
+    )
 
-plt.savefig(f"{SAVE_DIR}/compare_convergence_speed.png", dpi=300)
-plt.close()
+    if iid_global.get("round_time") and non_iid_global.get("round_time"):
+        plot_line_compare(
+            rounds_iid,
+            iid_global.get("round_time", []),
+            rounds_non_iid,
+            non_iid_global.get("round_time", []),
+            "Round Time: IID vs Non-IID",
+            "Round Time (seconds)",
+            f"{output_dir}/compare_round_time.png",
+        )
 
-print("✅ All comparison plots saved in:", SAVE_DIR)
+    plt.figure(figsize=(8, 5))
+    plt.bar(["IID", "Non-IID"], [avg_train_time(iid), avg_train_time(non_iid)])
+    plt.title("Average Client Training Time")
+    plt.ylabel("Seconds")
+    save(f"{output_dir}/compare_train_time.png")
+
+    plot_line_compare(
+        rounds_iid,
+        avg_client_series(iid, "test_accuracy", "local_accuracy", "accuracy"),
+        rounds_non_iid,
+        avg_client_series(non_iid, "test_accuracy", "local_accuracy", "accuracy"),
+        "Average Local Accuracy: IID vs Non-IID",
+        "Accuracy",
+        f"{output_dir}/compare_local_accuracy.png",
+        (0, 1),
+    )
+
+    plot_line_compare(
+        rounds_iid,
+        avg_reputation(iid),
+        rounds_non_iid,
+        avg_reputation(non_iid),
+        "Average Client Reputation: IID vs Non-IID",
+        "Reputation Score",
+        f"{output_dir}/compare_reputation.png",
+    )
+
+    iid_rep = client_reputation_distribution(iid)
+    non_iid_rep = client_reputation_distribution(non_iid)
+    if iid_rep and non_iid_rep:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+        ax1.boxplot(iid_rep)
+        ax1.set_title("Reputation Distribution (IID)")
+        ax1.set_ylabel("Reputation Score")
+        ax1.set_xticklabels([f"Client {i + 1}" for i in range(len(iid_rep))], rotation=45)
+        ax2.boxplot(non_iid_rep)
+        ax2.set_title("Reputation Distribution (Non-IID)")
+        ax2.set_xticklabels([f"Client {i + 1}" for i in range(len(non_iid_rep))], rotation=45)
+        save(f"{output_dir}/reputation_distribution_comparison.png")
+
+    total_clients = max(len(iid.get("clients", {})), len(non_iid.get("clients", {})), 1)
+    iid_penalty = iid_global.get("penalty_clients", [])
+    non_iid_penalty = non_iid_global.get("penalty_clients", [])
+    if iid_penalty and non_iid_penalty:
+        n = min(len(rounds_iid), len(rounds_non_iid), len(iid_penalty), len(non_iid_penalty))
+        x = np.arange(n)
+        width = 0.35
+        iid_rejected = np.array([len(p) for p in iid_penalty[:n]]) / total_clients
+        non_iid_rejected = np.array([len(p) for p in non_iid_penalty[:n]]) / total_clients
+        plt.figure(figsize=(10, 5))
+        plt.bar(x, 1 - iid_rejected, width=width, label="IID Valid")
+        plt.bar(x, iid_rejected, width=width, bottom=1 - iid_rejected, label="IID Rejected")
+        plt.bar(x + width, 1 - non_iid_rejected, width=width, label="Non-IID Valid")
+        plt.bar(x + width, non_iid_rejected, width=width, bottom=1 - non_iid_rejected, label="Non-IID Rejected")
+        plt.title("Valid vs Rejected Update Rate")
+        plt.xlabel("Communication Round")
+        plt.ylabel("Rate")
+        plt.xticks(x + width / 2, rounds_iid[:n])
+        plt.ylim(0, 1.05)
+        plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
+        save(f"{output_dir}/compare_update_rate_bar.png")
+
+    iid_gain = [0] + list(np.diff(iid_global.get("accuracy", [])))
+    non_iid_gain = [0] + list(np.diff(non_iid_global.get("accuracy", [])))
+    plot_line_compare(
+        rounds_iid,
+        iid_gain,
+        rounds_non_iid,
+        non_iid_gain,
+        "Model Convergence Speed",
+        "Accuracy Gain",
+        f"{output_dir}/compare_convergence_speed.png",
+    )
+
+    print(f"All comparison plots saved in: {output_dir}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--iid-history", default="history/server_history_fedadam_iid.json")
+    parser.add_argument("--non-iid-history", default="history/server_history_fedadam_non_iid.json")
+    parser.add_argument("--output-dir", default="picture/comparison")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    plot_comparison(load_history(args.iid_history), load_history(args.non_iid_history), args.output_dir)

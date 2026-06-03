@@ -53,18 +53,23 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             metrics = fit_res.metrics
             cid = str(metrics["client_id"])
             params = parameters_to_ndarrays(fit_res.parameters)
-            proof = json.loads(metrics.get("proof", "{}"))
+            try:
+                proof = json.loads(metrics.get("proof", "{}"))
+            except json.JSONDecodeError:
+                proof = {}
+            model_cid = metrics.get("cid", "")
 
             print(f"\nClient {cid} update received")
 
             start = time.time()
-            verified = verify_proof(params, proof)
+            verified = verify_proof(params, proof, client_id=cid, round_num=server_round, cid=model_cid)
             round_verify_times.append(time.time() - start)
 
             if not verified:
                 print(f"❌ ZKP FAILED for Client {cid}")
                 reputation_manager.update_reputation(cid, -1.0) 
-                # penalty_this_round.append(cid)
+                verify_update(cid, server_round, False)
+                penalty_clients.append(cid)
                 continue
 
             verify_update(cid, server_round, True)

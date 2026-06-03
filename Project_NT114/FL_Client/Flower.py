@@ -1,11 +1,11 @@
 import flwr as fl
 import torch
 import torch.nn as nn
-import os, json, hashlib
+import os
 from model import CNN
 from utils import load_client_data
 from ipfs_utils import upload_to_ipfs
-from zkp_utils import generate_proof
+from zkp_utils import canonical_proof_json, generate_proof, proof_hash
 from blockchain import submit_update
 from FL_Client.train import train
 from FL_Client.evaluate import evaluate
@@ -86,11 +86,10 @@ class FlowerClient(fl.client.NumPyClient):
             params = corrupt_parameters(params)
             print("💣 Sent corrupted update")
 
-        proof = generate_proof(params)
-        proof_str = json.dumps(proof)
-        proof_hash = hashlib.sha256((proof_str + cid).encode()).hexdigest()
+        proof = generate_proof(params, client_id=self.client_id, round_num=round_num, cid=cid)
+        proof_str = canonical_proof_json(proof)
         try:
-            tx_hash = submit_update(round_num, self.client_id, cid, proof_hash, result["accuracy"])
+            tx_hash = submit_update(round_num, self.client_id, cid, proof_hash(proof), result["accuracy"])
             if tx_hash:
                 print("TX:", tx_hash)
             else:

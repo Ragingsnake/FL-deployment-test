@@ -41,6 +41,7 @@ spec:
             - { containerPort: 8080 }
           env:
             - { name: SPLIT_TYPE, value: "${SPLIT_TYPE}" }
+            - { name: FL_ROUNDS, value: "${FL_ROUNDS}" }
             - { name: IPFS_API, value: "/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001" }
             - { name: ETH_RPC,  value: "http://geth-svc.blockchain.svc.cluster.local:8545" }
             - name: REPUTATION_ADDRESS

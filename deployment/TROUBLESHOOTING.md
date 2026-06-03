@@ -38,7 +38,7 @@ kubectl -n aggregation logs -f deploy/fl-server
 ```
 You should see Flower output like:
 ```
-INFO flwr 2026-05-12 ... :  Starting Flower server, config: num_rounds=25
+INFO flwr 2026-05-12 ... :  Starting Flower server, config: num_rounds=40
 INFO flwr 2026-05-12 ... :  fit_round 1: strategy sampled 5 clients (out of 5)
 INFO flwr 2026-05-12 ... :  aggregate_fit: received 5 results and 0 failures
 ```
@@ -136,6 +136,54 @@ az storage blob upload-batch -d results -s ~/fl-outputs --account-name <yoursa>
 ---
 
 ## 6. Re-running an experiment cleanly
+
+### Run IID after a completed non-IID run
+
+The server keeps `/app/history` and `/app/picture` on PVCs, so the non-IID
+history remains available while you run IID.
+
+```bash
+# Stop the completed/non-IID client set.
+kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
+kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
+
+# Restart the server in IID mode. Keep FL_ROUNDS aligned with the experiment.
+kubectl -n aggregation set env deploy/fl-server SPLIT_TYPE=iid FL_ROUNDS=40
+kubectl -n aggregation rollout restart deploy/fl-server
+kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+
+# Recreate clients from the last rendered manifest, but with IID mode.
+cp /tmp/k8s-rendered/40-clients.yaml /tmp/k8s-rendered/40-clients-iid.yaml
+sed -i -E 's/(name: SPLIT_TYPE, value: ")[^"]+(")/\1iid\2/' /tmp/k8s-rendered/40-clients-iid.yaml
+kubectl apply -f /tmp/k8s-rendered/40-clients-iid.yaml
+
+# Watch the IID run.
+kubectl -n aggregation logs -f deploy/fl-server
+```
+
+When IID finishes, the server generates:
+
+- `/app/history/server_history_fedadam_non_iid.json`
+- `/app/history/server_history_fedadam_iid.json`
+- `/app/picture/log_full/non_iid/*.png`
+- `/app/picture/log_full/iid/*.png`
+- `/app/picture/comparison/*.png`
+
+Pull all generated histories and charts:
+
+```bash
+bash deployment/scripts/pull-outputs.sh ./fl-outputs
+```
+
+If you need to manually regenerate the comparison plots inside the server pod:
+
+```bash
+kubectl -n aggregation exec deploy/fl-server -- \
+  python comparison.py \
+    --iid-history history/server_history_fedadam_iid.json \
+    --non-iid-history history/server_history_fedadam_non_iid.json \
+    --output-dir picture/comparison
+```
 
 ```bash
 # Re-roll clients (keeps server, chain, IPFS state):

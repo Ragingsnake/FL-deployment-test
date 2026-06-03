@@ -43,6 +43,25 @@ def main():
     else:
         print(f"History file not found, skipping plot generation: {history_path}")
 
+    iid_history = "history/server_history_fedadam_iid.json"
+    non_iid_history = "history/server_history_fedadam_non_iid.json"
+    if os.path.exists(iid_history) and os.path.exists(non_iid_history):
+        comparison_dir = os.environ.get("COMPARISON_PLOT_DIR", "picture/comparison")
+        print(f"Generating IID vs non-IID comparison plots into {comparison_dir}...")
+        subprocess.run(
+            [
+                sys.executable,
+                "comparison.py",
+                "--iid-history",
+                iid_history,
+                "--non-iid-history",
+                non_iid_history,
+                "--output-dir",
+                comparison_dir,
+            ],
+            check=False,
+        )
+
     if os.environ.get("KEEP_SERVER_ALIVE_AFTER_TRAINING", "1") == "1":
         print("Training finished. Keeping server pod alive for output retrieval.")
         while True:

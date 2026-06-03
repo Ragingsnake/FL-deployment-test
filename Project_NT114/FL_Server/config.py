@@ -1,6 +1,6 @@
 import os
 
-ROUNDS = int(os.environ.get("FL_ROUNDS", "25"))
+ROUNDS = int(os.environ.get("FL_ROUNDS", "40"))
 NUM_CLIENTS = 5
 
 LR = float(os.environ.get("FEDADAM_LR", "0.0007"))
