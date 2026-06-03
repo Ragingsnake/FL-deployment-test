@@ -1,6 +1,10 @@
 import hashlib
 import json
+import os
 import secrets
+import time
+
+import requests
 
 
 # RFC 3526 2048-bit MODP Group. q=(p-1)/2 is prime, so Schnorr verification
@@ -22,6 +26,9 @@ P = int(
 Q = (P - 1) // 2
 G = 2
 PROOF_VERSION = "schnorr-nizk-v1"
+ZKP_NODE_URL = os.environ.get("ZKP_NODE_URL", "").rstrip("/")
+ZKP_NODE_TIMEOUT = float(os.environ.get("ZKP_NODE_TIMEOUT", "30"))
+ZKP_NODE_RETRIES = int(os.environ.get("ZKP_NODE_RETRIES", "3"))
 
 
 def _sha256_bytes(*parts):
@@ -74,9 +81,7 @@ def proof_hash(proof):
     return hashlib.sha256(canonical_proof_json(proof).encode("utf-8")).hexdigest()
 
 
-def generate_proof(parameters, client_id=None, round_num=None, cid=None):
-    statement = build_statement(parameters, client_id, round_num, cid)
-
+def _generate_statement_proof(statement):
     secret = secrets.randbelow(Q - 1) + 1
     public_key = pow(G, secret, P)
 
@@ -95,7 +100,7 @@ def generate_proof(parameters, client_id=None, round_num=None, cid=None):
     }
 
 
-def verify_proof(parameters, proof, client_id=None, round_num=None, cid=None):
+def _verify_statement_proof(statement, proof):
     if not isinstance(proof, dict):
         return False
 
@@ -103,8 +108,7 @@ def verify_proof(parameters, proof, client_id=None, round_num=None, cid=None):
         if proof.get("version") != PROOF_VERSION:
             return False
 
-        expected_statement = build_statement(parameters, client_id, round_num, cid)
-        if proof.get("statement") != expected_statement:
+        if proof.get("statement") != statement:
             return False
 
         public_key = int(proof["public_key"])
@@ -118,9 +122,60 @@ def verify_proof(parameters, proof, client_id=None, round_num=None, cid=None):
         if pow(public_key, Q, P) != 1 or pow(commitment, Q, P) != 1:
             return False
 
-        challenge = _challenge(expected_statement, public_key, commitment)
+        challenge = _challenge(statement, public_key, commitment)
         left = pow(G, response, P)
         right = (commitment * pow(public_key, challenge, P)) % P
         return left == right
     except (KeyError, TypeError, ValueError):
         return False
+
+
+def _call_zkp_node(path, payload):
+    last_error = None
+    for attempt in range(1, ZKP_NODE_RETRIES + 1):
+        try:
+            response = requests.post(
+                f"{ZKP_NODE_URL}{path}",
+                json=payload,
+                timeout=ZKP_NODE_TIMEOUT,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            last_error = exc
+            if attempt < ZKP_NODE_RETRIES:
+                time.sleep(min(2 ** (attempt - 1), 5))
+    raise RuntimeError(last_error)
+
+
+def generate_proof(parameters, client_id=None, round_num=None, cid=None):
+    statement = build_statement(parameters, client_id, round_num, cid)
+
+    if ZKP_NODE_URL:
+        try:
+            result = _call_zkp_node("/prove", {"statement": statement})
+            return result["proof"]
+        except Exception as exc:
+            raise RuntimeError(f"ZKP node proof generation failed: {exc}") from exc
+
+    return _generate_statement_proof(statement)
+
+
+def verify_proof(parameters, proof, client_id=None, round_num=None, cid=None):
+    statement = build_statement(parameters, client_id, round_num, cid)
+
+    if ZKP_NODE_URL:
+        try:
+            result = _call_zkp_node(
+                "/verify",
+                {
+                    "statement": statement,
+                    "proof": proof,
+                },
+            )
+            return bool(result.get("valid"))
+        except Exception as exc:
+            print(f"ZKP node verification failed: {exc}")
+            return False
+
+    return _verify_statement_proof(statement, proof)

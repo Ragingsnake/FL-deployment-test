@@ -1,0 +1,29 @@
+FROM python:3.10-slim AS builder
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+
+ENV PATH=/opt/venv/bin:$PATH
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir requests==2.32.3
+
+COPY zkp_node.py zkp_utils.py ./
+
+FROM python:3.10-slim
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH=/opt/venv/bin:$PATH \
+    ZKP_NODE_HOST=0.0.0.0 \
+    ZKP_NODE_PORT=8090
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app/zkp_node.py /app/zkp_utils.py /app/
+
+EXPOSE 8090
+
+CMD ["python", "zkp_node.py"]

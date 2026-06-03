@@ -20,7 +20,7 @@ REPO_URL="${REPO_URL:-https://github.com/anhkiet-dao/Project_NT114.git}"
 WORKDIR="${WORKDIR:-$PWD/Project_NT114}"
 # ----------------------------------------
 
-IMAGES=(fl-server fl-client fl-blockchain)
+IMAGES=(fl-server fl-client fl-blockchain fl-zkp-node)
 
 echo "==> 1/7 az login (will prompt if not already logged in)"
 az account show >/dev/null 2>&1 || az login
@@ -90,6 +90,7 @@ kubectl apply -f /tmp/k8s-rendered/20-blockchain.yaml
 
 echo "==> 7/7 Wait for blockchain and deploy aggregator+clients"
 kubectl -n blockchain rollout status statefulset/geth --timeout=15m
+kubectl -n blockchain rollout status deploy/zkp-node --timeout=5m
 kubectl -n blockchain wait --for=condition=complete job/contract-migrate --timeout=15m \
   || { echo "migration failed"; kubectl -n blockchain logs job/contract-migrate; exit 1; }
 

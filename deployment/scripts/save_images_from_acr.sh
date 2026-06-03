@@ -14,7 +14,7 @@ TAG="${2:-${TAG:-v1}}"
 OUT_DIR="${3:-./image-cache}"
 DOCKERHUB_REPO="${4:-${DOCKERHUB_REPO:-}}"   # e.g. myuser
 
-IMAGES=(fl-server fl-client fl-blockchain)
+IMAGES=(fl-server fl-client fl-blockchain fl-zkp-node)
 mkdir -p "$OUT_DIR"
 
 echo "Logging in to ACR: $ACR_NAME"

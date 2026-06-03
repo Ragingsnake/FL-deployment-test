@@ -11,6 +11,7 @@ into a cloud-native deployment on **Azure Kubernetes Service** that matches the
 | `fl-clients`   | `fl-client-0..4` (STS)    | `fl-client`                |
 | `ipfs`         | `ipfs-0` (STS, 1 replica) | `ipfs/kubo:v0.28.0`        |
 | `blockchain`   | `geth-0` + migrate Job    | `fl-blockchain`            |
+| `blockchain`   | `zkp-node` proof service  | `fl-zkp-node`              |
 | `aggregation`  | `fl-server` (Deployment)  | `fl-server`                |
 
 ## TL;DR — running it on Azure Cloudshell
@@ -24,7 +25,7 @@ That single script:
 1. `az login`, creates `fl-rg`, ACR, and an AKS cluster (3 × `Standard_D4s_v5` by default).
 2. Clones the upstream FL repo.
 3. Applies the source patches in `scripts/apply-fixes.sh` (de-hardcodes localhost endpoints).
-4. Builds all three images with **ACR Tasks** — so you don't need Docker installed.
+4. Builds all four images with **ACR Tasks** — so you don't need Docker installed.
 5. `envsubst`-renders the manifests with your registry + tag and `kubectl apply`s them.
 6. Waits for the Truffle migration Job to publish `Reputation.sol`, then deploys the aggregator + clients.
 
@@ -46,15 +47,35 @@ Found and patched by `scripts/apply-fixes.sh`:
   `FL_SERVER_HOST` + `FL_SERVER_PORT` env vars.
 * `truffle-config.js` — added a `kube` network entry pointing at `geth-svc`.
 
-I did not touch model code, defense logic, reputation math, or ZKP utilities —
-those are correct as-is.
+## ZKP / zkSNARK architecture
+
+The deployment now has a dedicated `zkp-node` in the `blockchain` namespace:
+
+```text
+fl-client -> zkp-node /prove  -> proof
+fl-client -> fl-server        -> model update + CID + proof
+fl-server -> zkp-node /verify -> valid/invalid
+fl-server -> geth/Reputation  -> proof hash + reputation result
+```
+
+This is intentionally the smallest change to the FL code. `zkp_utils.py` keeps
+the old function names (`generate_proof`, `verify_proof`) but delegates to
+`ZKP_NODE_URL=http://zkp-node-svc.blockchain.svc.cluster.local:8090` in
+Kubernetes. Local development still falls back to the in-process proof helper
+when `ZKP_NODE_URL` is not set.
+
+For actual zkSNARKs, the boundary is the ZKP node: mount R1CS/WASM/zkey/vkey
+artifacts into that pod and replace the `/prove` and `/verify` backend with
+Groth16 or Plonk proof generation/verification. The FL clients, aggregator,
+IPFS, and geth contract flow do not need to change as long as the ZKP node keeps
+the same HTTP contract.
 
 ## Things you may still need
 
 | Concern | Detail |
 |--------|--------|
 | **EMNIST data** | The clients reference `data_new/`. If the repo's bundled split is small enough (a few hundred MB), it is baked into the image. For larger datasets, mount an Azure Files PVC and modify `FL_Client/train.py` to load from `/data`. |
-| **ZK circuit artifacts** | If your ZKP uses pre-generated proving/verifying keys (snarkjs, circom), drop them into a ConfigMap or PVC. The current code uses `zkp_utils.py` — verify whether keys are committed or generated at runtime. |
+| **ZK circuit artifacts** | For actual zkSNARKs, mount proving/verifying artifacts into `zkp-node` and swap its backend while preserving `/prove` and `/verify`. |
 | **Solidity compiler** | Truffle 5.11 expects `solc` `^0.8.x`. The `Dockerfile.blockchain` uses Truffle's bundled solc. If contracts target a different version, edit `truffle-config.js`. |
 | **GPU nodes** | CNN training on EMNIST is CPU-feasible but slow. For real runs, add a GPU node pool: `az aks nodepool add -g $RG --cluster-name $AKS_NAME -n gpupool -s Standard_NC6s_v3 -c 1` and add a `nodeSelector` to the client manifest. |
 | **Persistent block data** | Geth PoA data lives in a `PVC`. Deleting the StatefulSet doesn't drop the PVC, so the chain survives restarts. |

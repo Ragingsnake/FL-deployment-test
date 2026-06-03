@@ -12,6 +12,7 @@ NODE_COUNT="${NODE_COUNT:-3}"
 NODE_SIZE="${NODE_SIZE:-Standard_B2as_v2}"
 TAG="${TAG:-v1}"
 SPLIT_TYPE="${SPLIT_TYPE:-non_iid}"
+FL_ROUNDS="${FL_ROUNDS:-40}"
 WORKDIR="${1:-$PWD/Project_NT114}"
 
 if [ ! -d "$WORKDIR" ]; then
@@ -32,7 +33,7 @@ az aks  create -n "$AKS_NAME" -g "$RESOURCE_GROUP" \
 
 az aks get-credentials -n "$AKS_NAME" -g "$RESOURCE_GROUP" --overwrite-existing
 REGISTRY="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
-export REGISTRY TAG SPLIT_TYPE
+export REGISTRY TAG SPLIT_TYPE FL_ROUNDS
 
 # Drop our deployment overlay into the source tree so Dockerfiles can find it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,11 +46,12 @@ cd "$WORKDIR"
 az acr build -r "$ACR_NAME" -t "fl-server:$TAG"     -f deployment/docker/Dockerfile.server     --platform linux/amd64 .
 az acr build -r "$ACR_NAME" -t "fl-client:$TAG"     -f deployment/docker/Dockerfile.client     --platform linux/amd64 .
 az acr build -r "$ACR_NAME" -t "fl-blockchain:$TAG" -f deployment/docker/Dockerfile.blockchain --platform linux/amd64 .
+az acr build -r "$ACR_NAME" -t "fl-zkp-node:$TAG"   -f deployment/docker/Dockerfile.zkp        --platform linux/amd64 .
 
 echo "==> 4/6 Render manifests with REGISTRY/TAG and apply"
 mkdir -p /tmp/k8s-rendered
 for f in deployment/k8s/*.yaml; do
-  envsubst '$REGISTRY $TAG $SPLIT_TYPE' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
+  envsubst '$REGISTRY $TAG $SPLIT_TYPE $FL_ROUNDS' < "$f" > "/tmp/k8s-rendered/$(basename "$f")"
 done
 kubectl apply -f /tmp/k8s-rendered/00-namespaces.yaml
 kubectl apply -f /tmp/k8s-rendered/10-ipfs.yaml
@@ -57,6 +59,7 @@ kubectl apply -f /tmp/k8s-rendered/20-blockchain.yaml
 
 echo "==> 5/6 Wait for blockchain RPC and run contract migration"
 kubectl -n blockchain rollout status statefulset/geth --timeout=15m
+kubectl -n blockchain rollout status deploy/zkp-node --timeout=5m
 kubectl -n blockchain wait --for=condition=complete job/contract-migrate --timeout=15m \
   || { echo "migration failed"; kubectl -n blockchain logs job/contract-migrate; exit 1; }
 

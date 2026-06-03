@@ -21,6 +21,7 @@ A healthy steady state looks like:
 NAMESPACE     NAME              READY   STATUS    RESTARTS
 aggregation   fl-server-...     1/1     Running   0
 blockchain    geth-0            1/1     Running   0
+blockchain    zkp-node-...      1/1     Running   0
 fl-clients    fl-client-0..4    1/1     Running   0
 ipfs          ipfs-0            1/1     Running   0
 ```
@@ -57,6 +58,18 @@ kubectl -n blockchain logs job/contract-migrate
 kubectl -n aggregation get configmap contract-address -o yaml
 ```
 
+### ZKP node
+```bash
+kubectl -n blockchain rollout status deploy/zkp-node
+kubectl -n blockchain logs -f deploy/zkp-node
+kubectl -n blockchain run zkp-probe --rm -it --image=curlimages/curl --restart=Never -- \
+  curl -s http://zkp-node-svc:8090/healthz
+```
+
+The health response should include `{"status":"ok"}` and the active proof
+backend. If clients or the server cannot reach it, proof generation or
+verification fails closed.
+
 ### IPFS
 ```bash
 kubectl -n ipfs logs -f ipfs-0
@@ -78,6 +91,7 @@ kubectl -n ipfs exec -it ipfs-0 -- ipfs repo stat
 | `IPFS Upload Failed` in client logs | Old `ipfshttpclient` against new Kubo API. Pin Kubo to `v0.28.0` (already done in `10-ipfs.yaml`); confirm with `kubectl -n ipfs exec ipfs-0 -- ipfs version`. |
 | Geth pod restarts | PVC corrupted from forced delete | delete the PVC `geth-data` and re-apply (you lose chain state) |
 | `ImagePullBackOff` | ACR not attached to AKS | `az aks update -g fl-rg -n fl-aks --attach-acr $ACR_NAME` |
+| ZKP verification fails for every client | `zkp-node` unavailable, mismatched proof backend, or stale client/server image | Check `kubectl -n blockchain logs deploy/zkp-node`, confirm `ZKP_NODE_URL` on server/clients, rebuild all four images with the same tag |
 
 ---
 
@@ -91,6 +105,10 @@ kubectl -n fl-clients exec -it fl-client-0 -- bash
 kubectl -n blockchain run rpc-probe --rm -it --image=curlimages/curl --restart=Never -- \
   curl -s http://geth-svc:8545 -H 'Content-Type: application/json' \
   --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+# Hit the ZKP node health endpoint
+kubectl -n blockchain run zkp-probe --rm -it --image=curlimages/curl --restart=Never -- \
+  curl -s http://zkp-node-svc:8090/healthz
 
 # Browse IPFS contents
 kubectl -n ipfs exec -it ipfs-0 -- ipfs pin ls --type=recursive

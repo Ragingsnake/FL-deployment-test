@@ -36,7 +36,7 @@ TAG="${2:-v1}"
 PLATFORM="${3:-linux/amd64}"
 BUILD_CTX="$(pwd)"
 
-IMAGES=(fl-server fl-client fl-blockchain)
+IMAGES=(fl-server fl-client fl-blockchain fl-zkp-node)
 
 echo "Building and pushing images to Docker Hub: $DOCKERHUB_REPO (tag=$TAG, platform=$PLATFORM)"
 
@@ -57,6 +57,8 @@ for img in "${IMAGES[@]}"; do
   # Special-case mapping: fl-blockchain -> Dockerfile.blockchain
   if [ "$img" = "fl-blockchain" ]; then
     DOCKERFILE="deployment/docker/Dockerfile.blockchain"
+  elif [ "$img" = "fl-zkp-node" ]; then
+    DOCKERFILE="deployment/docker/Dockerfile.zkp"
   elif [ "$img" = "fl-server" ]; then
     DOCKERFILE="deployment/docker/Dockerfile.server"
   elif [ "$img" = "fl-client" ]; then

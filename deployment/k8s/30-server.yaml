@@ -44,6 +44,7 @@ spec:
             - { name: FL_ROUNDS, value: "${FL_ROUNDS}" }
             - { name: IPFS_API, value: "/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001" }
             - { name: ETH_RPC,  value: "http://geth-svc.blockchain.svc.cluster.local:8545" }
+            - { name: ZKP_NODE_URL, value: "http://zkp-node-svc.blockchain.svc.cluster.local:8090" }
             - name: REPUTATION_ADDRESS
               valueFrom:
                 configMapKeyRef:
