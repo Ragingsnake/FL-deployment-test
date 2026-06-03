@@ -9,7 +9,7 @@ from zkp_utils import canonical_proof_json, generate_proof, proof_hash
 from blockchain import submit_update
 from FL_Client.train import train
 from FL_Client.evaluate import evaluate
-from FL_Client.faulty import is_faulty_client, corrupt_parameters
+from FL_Client.faulty import corrupt_parameters
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -31,6 +31,16 @@ def _tamper_proof(proof):
     bad_statement["model_hash"] = "invalid-demo-proof"
     bad_proof["statement"] = bad_statement
     return bad_proof
+
+
+def _demo_enabled(client_id, round_num, clients_env, start_env, end_env):
+    clients = _parse_client_ids(os.environ.get(clients_env, ""))
+    if client_id not in clients:
+        return False
+
+    start_round = int(os.environ.get(start_env, "1"))
+    end_round = int(os.environ.get(end_env, str(10**9)))
+    return start_round <= int(round_num) <= end_round
 
 class FlowerClient(fl.client.NumPyClient):
     def __init__(self, client_id, split_type):
@@ -79,11 +89,20 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
         round_num = config.get("server_round", 1)
         
-        faulty_clients = _parse_client_ids(config.get("demo_faulty_clients", ""))
-        bad_zkp_clients = _parse_client_ids(config.get("demo_bad_zkp_clients", ""))
-
-        is_faulty = self.client_id in faulty_clients
-        is_bad_zkp = self.client_id in bad_zkp_clients
+        is_faulty = _demo_enabled(
+            self.client_id,
+            round_num,
+            "DEMO_FAULTY_CLIENTS",
+            "DEMO_FAULTY_START_ROUND",
+            "DEMO_FAULTY_END_ROUND",
+        )
+        is_bad_zkp = _demo_enabled(
+            self.client_id,
+            round_num,
+            "DEMO_BAD_ZKP_CLIENTS",
+            "DEMO_BAD_ZKP_START_ROUND",
+            "DEMO_BAD_ZKP_END_ROUND",
+        )
         
         if is_faulty:
             print(f"⚠ Client {self.client_id} is FAULTY")
@@ -106,7 +125,7 @@ class FlowerClient(fl.client.NumPyClient):
         cid = upload_to_ipfs(model_path)
         params = self.get_parameters({})
         if is_faulty:
-            params = corrupt_parameters(params, config.get("demo_faulty_noise_scale", 0.01))
+            params = corrupt_parameters(params)
             print("💣 Sent corrupted update")
 
         proof = generate_proof(params, client_id=self.client_id, round_num=round_num, cid=cid)

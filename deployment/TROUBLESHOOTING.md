@@ -166,21 +166,22 @@ update.
 Use a short run first:
 
 ```bash
-# Configure the server to mark client 2 faulty for rounds 2..4.
-kubectl -n aggregation set env deploy/fl-server \
-  FL_ROUNDS=6 \
+# Shorten the server run; the server does not decide which client is faulty.
+kubectl -n aggregation set env deploy/fl-server FL_ROUNDS=6
+kubectl -n aggregation rollout restart deploy/fl-server
+kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+
+# Re-run clients, then configure client-side faulty behavior.
+kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
+kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
+kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
+kubectl -n fl-clients set env statefulset/fl-client \
   DEMO_FAULTY_CLIENTS=2 \
   DEMO_FAULTY_START_ROUND=2 \
   DEMO_FAULTY_END_ROUND=4 \
   DEMO_FAULTY_NOISE_SCALE=0.25
-
-kubectl -n aggregation rollout restart deploy/fl-server
-kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
-
-# Re-run the clients against the restarted server.
-kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
-kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
-kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
+kubectl -n fl-clients rollout restart statefulset/fl-client
+kubectl -n fl-clients rollout status statefulset/fl-client --timeout=5m
 
 kubectl -n aggregation logs -f deploy/fl-server
 ```
@@ -195,7 +196,7 @@ Expected signs:
 Clean the demo variables afterward:
 
 ```bash
-kubectl -n aggregation set env deploy/fl-server \
+kubectl -n fl-clients set env statefulset/fl-client \
   DEMO_FAULTY_CLIENTS- \
   DEMO_FAULTY_START_ROUND- \
   DEMO_FAULTY_END_ROUND- \
@@ -209,18 +210,19 @@ proof before sending the update. The server should reject that client before
 aggregation and penalize reputation.
 
 ```bash
-kubectl -n aggregation set env deploy/fl-server \
-  FL_ROUNDS=6 \
-  DEMO_BAD_ZKP_CLIENTS=3 \
-  DEMO_BAD_ZKP_START_ROUND=2 \
-  DEMO_BAD_ZKP_END_ROUND=4
-
+kubectl -n aggregation set env deploy/fl-server FL_ROUNDS=6
 kubectl -n aggregation rollout restart deploy/fl-server
 kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
 
 kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
 kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
 kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
+kubectl -n fl-clients set env statefulset/fl-client \
+  DEMO_BAD_ZKP_CLIENTS=3 \
+  DEMO_BAD_ZKP_START_ROUND=2 \
+  DEMO_BAD_ZKP_END_ROUND=4
+kubectl -n fl-clients rollout restart statefulset/fl-client
+kubectl -n fl-clients rollout status statefulset/fl-client --timeout=5m
 
 kubectl -n aggregation logs -f deploy/fl-server
 ```
@@ -236,7 +238,7 @@ Expected signs:
 Clean the demo variables afterward:
 
 ```bash
-kubectl -n aggregation set env deploy/fl-server \
+kubectl -n fl-clients set env statefulset/fl-client \
   DEMO_BAD_ZKP_CLIENTS- \
   DEMO_BAD_ZKP_START_ROUND- \
   DEMO_BAD_ZKP_END_ROUND-

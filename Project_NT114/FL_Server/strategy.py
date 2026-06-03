@@ -41,41 +41,11 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
 
     def configure_fit(self, server_round, parameters, client_manager):
         fit_config = super().configure_fit(server_round, parameters, client_manager)
-        demo_config = self._demo_config(server_round)
 
         for _, fit_ins in fit_config:
             fit_ins.config["server_round"] = server_round
-            fit_ins.config.update(demo_config)
 
         return fit_config
-
-    def _demo_config(self, server_round):
-        return {
-            "demo_faulty_clients": self._enabled_clients(
-                "DEMO_FAULTY_CLIENTS",
-                "DEMO_FAULTY_START_ROUND",
-                "DEMO_FAULTY_END_ROUND",
-                server_round,
-            ),
-            "demo_faulty_noise_scale": os.environ.get("DEMO_FAULTY_NOISE_SCALE", "0.01"),
-            "demo_bad_zkp_clients": self._enabled_clients(
-                "DEMO_BAD_ZKP_CLIENTS",
-                "DEMO_BAD_ZKP_START_ROUND",
-                "DEMO_BAD_ZKP_END_ROUND",
-                server_round,
-            ),
-        }
-
-    def _enabled_clients(self, clients_env, start_env, end_env, server_round):
-        clients = os.environ.get(clients_env, "").strip()
-        if not clients:
-            return ""
-
-        start_round = int(os.environ.get(start_env, "1"))
-        end_round = int(os.environ.get(end_env, str(10**9)))
-        if start_round <= server_round <= end_round:
-            return clients
-        return ""
 
     def aggregate_fit(self, server_round, results, failures):
         self.start_time = time.time()
