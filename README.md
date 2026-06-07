@@ -96,3 +96,7 @@ and expected log lines.
 
 See `TROUBLESHOOTING.md` for how to inspect a running cluster and pull the
 PNG charts / logs back to your machine.
+
+For a full explanation of the architecture, cloud infrastructure, workflow,
+ZKP/IPFS/FL/blockchain layers, reputation scoring, and code paths, see
+[`SYSTEM_GUIDE.md`](SYSTEM_GUIDE.md).

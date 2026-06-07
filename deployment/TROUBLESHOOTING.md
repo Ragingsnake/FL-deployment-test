@@ -167,9 +167,11 @@ Use a short run first:
 
 ```bash
 # Shorten the server run; the server does not decide which client is faulty.
+# The server is intentionally long-running, so wait only for the replacement
+# pod to become Ready. Do not wait for the server to terminate.
 kubectl -n aggregation set env deploy/fl-server FL_ROUNDS=6
-kubectl -n aggregation rollout restart deploy/fl-server
-kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+kubectl -n aggregation delete pod -l app=fl-server --wait=false
+kubectl -n aggregation wait --for=condition=Ready pod -l app=fl-server --timeout=5m
 
 # Re-run clients, then configure client-side faulty behavior.
 kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
@@ -184,6 +186,7 @@ kubectl -n fl-clients rollout restart statefulset/fl-client
 kubectl -n fl-clients rollout status statefulset/fl-client --timeout=5m
 
 kubectl -n aggregation logs -f deploy/fl-server
+kubectl -n fl-clients logs -f fl-client-2
 ```
 
 Expected signs:
@@ -211,8 +214,8 @@ aggregation and penalize reputation.
 
 ```bash
 kubectl -n aggregation set env deploy/fl-server FL_ROUNDS=6
-kubectl -n aggregation rollout restart deploy/fl-server
-kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+kubectl -n aggregation delete pod -l app=fl-server --wait=false
+kubectl -n aggregation wait --for=condition=Ready pod -l app=fl-server --timeout=5m
 
 kubectl -n fl-clients delete statefulset fl-client --ignore-not-found
 kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || true
@@ -225,6 +228,7 @@ kubectl -n fl-clients rollout restart statefulset/fl-client
 kubectl -n fl-clients rollout status statefulset/fl-client --timeout=5m
 
 kubectl -n aggregation logs -f deploy/fl-server
+kubectl -n fl-clients logs -f fl-client-3
 ```
 
 Expected signs:
@@ -256,8 +260,8 @@ kubectl -n fl-clients wait --for=delete statefulset/fl-client --timeout=5m || tr
 
 # Restart the server in IID mode. Keep FL_ROUNDS aligned with the experiment.
 kubectl -n aggregation set env deploy/fl-server SPLIT_TYPE=iid FL_ROUNDS=40
-kubectl -n aggregation rollout restart deploy/fl-server
-kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
+kubectl -n aggregation delete pod -l app=fl-server --wait=false
+kubectl -n aggregation wait --for=condition=Ready pod -l app=fl-server --timeout=5m
 
 # Recreate clients from the last rendered manifest, but with IID mode.
 cp /tmp/k8s-rendered/40-clients.yaml /tmp/k8s-rendered/40-clients-iid.yaml
