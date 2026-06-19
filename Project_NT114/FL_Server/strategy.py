@@ -1,4 +1,3 @@
-from Project_NT114.reputation import update_reputation
 import flwr as fl
 import numpy as np
 import json
@@ -8,7 +7,7 @@ import os
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
 
 from blockchain import verify_update
-from reputation import evaluate_clients
+from reputation import evaluate_clients, update_reputation
 from zkp_utils import verify_proof
 from model import CNN
 
