@@ -1,3 +1,4 @@
+from Project_NT114.reputation import update_reputation
 import flwr as fl
 import numpy as np
 import json
@@ -12,7 +13,7 @@ from zkp_utils import verify_proof
 from model import CNN
 
 from FL_Server.config import NUM_CLIENTS, BASE_LAMBDA, MAX_LAMBDA
-from FL_Server.reputation import reputation_manager
+# from FL_Server.reputation import reputation_manager
 from FL_Server.defense import compute_delta
 from FL_Server.fedadam import fedadam_update
 
@@ -74,8 +75,9 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             round_verify_times.append(time.time() - start)
 
             if not verified:
-                print(f"❌ ZKP FAILED for Client {cid}")
-                reputation_manager.update_reputation(cid, -1.0) 
+                print(f"ZKP FAILED for Client {cid}")
+                update_reputation(cid, -1.0)
+                # reputation_manager.update_reputation(cid, -1.0) 
                 verify_update(cid, server_round, False)
                 penalty_clients.append(cid)
                 continue
@@ -96,7 +98,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
         # ===== INITIALIZE GLOBAL MODEL =====
         if self.global_weights is None:
             # FIX: Average all initial client weights instead of using only Client 0
-            print("🔄 First round: averaging all client updates for initial global model...")
+            print("First round: averaging all client updates for initial global model...")
             all_params = [info["params"] for info in clients_info]
             num_clients = len(all_params)
             
@@ -109,7 +111,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
                 averaged_weights.append(layer_avg)
             
             self.global_weights = averaged_weights
-            print(f"✓ Initialized global weights from average of {num_clients} clients")
+            print(f"Initialized global weights from average of {num_clients} clients")
 
         # ===== CLIENT EVALUATION =====
         client_weights_dict = {info["client_id"]: 
@@ -142,7 +144,7 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
 
             # ===== SKIP CLIENT XẤU =====
             if score < -0.4 or reputation < 0.2:
-                print(f"🚫 Skip client {cid} (score={score:.3f}, rep={reputation:.3f})")
+                print(f"Skip client {cid} (score={score:.3f}, rep={reputation:.3f})")
                 penalty_clients.append(cid)
                 continue
 
@@ -152,9 +154,9 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             # ===== IQR OUTLIER DEFENSE =====
             if delta < lower or delta > upper:
 
-                print(f"⚠ Outlier Client {cid} (Δ={delta:.4f})")
+                print(f"Outlier Client {cid} (Δ={delta:.4f})")
 
-                reputation *= 0.7
+                # reputation *= 0.7
 
                 penalty_clients.append(cid)
             

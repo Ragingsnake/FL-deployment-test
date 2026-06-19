@@ -4,9 +4,13 @@ import numpy as np
 
 REPUTATION_FILE = "reputation.json"
 INITIAL_REPUTATION = 0.5
+
+OUTLIER_HISTORY = {}       
+OUTLIER_CONSECUTIVE_REQUIRED = 3
+SIM_HISTORY = {}
 SIM_REJECT_THRESHOLD = 0.1
-SIM_HISTORY = {}          # tracks consecutive low-sim rounds per client
-CONSECUTIVE_REQUIRED = 3  # must fail 3 rounds in a row to be "rejected"
+CONSECUTIVE_REQUIRED = 3
+EMA_LR = 0.12              
 
 # ================= LOAD / SAVE =================
 def load_reputation():
@@ -50,8 +54,9 @@ def update_reputation(client_id, score):
 
     old_rep = float(rep_dict.get(cid, INITIAL_REPUTATION))
 
-    lr = 0.3
-    new_rep = old_rep + lr * (score - old_rep)
+    # FIX: lower EMA learning rate so single noisy rounds can't
+    # swing reputation by 0.2-0.3 in one step.
+    new_rep = old_rep + EMA_LR * (score - old_rep)
     new_rep = float(np.clip(new_rep, 0.1, 1.0))
 
     rep_dict[cid] = new_rep
@@ -80,6 +85,7 @@ def evaluate_clients(global_weights, client_weights_dict, clients_info, rejected
 
     for i, info in enumerate(clients_info):
         cid = info["client_id"]
+        cid_key = str(cid)
         delta = delta_dict[cid]
         sim = sim_dict[cid]
 
@@ -87,6 +93,11 @@ def evaluate_clients(global_weights, client_weights_dict, clients_info, rejected
         norm_delta = min(delta / mean_delta, 3.0)
         score_delta = 1.0 - (norm_delta / 3.0)
 
+        # NOTE: acc_norm / loss_norm are still within-round relative ranks.
+        # With only 5 clients this remains the single biggest source of
+        # remaining noise. Consider switching to absolute thresholds
+        # (e.g. acc vs a fixed target, or vs each client's own rolling
+        # average) if you still see swings after this patch.
         acc_norm = (info["test_acc"] - min_acc) / (max_acc - min_acc + 1e-8)
         loss_norm = (info["test_loss"] - min_loss) / (max_loss - min_loss + 1e-8)
 
@@ -94,77 +105,31 @@ def evaluate_clients(global_weights, client_weights_dict, clients_info, rejected
 
         status = "normal"
 
-        # FIX: require CONSECUTIVE low-similarity rounds before hard rejection,
-        # instead of nuking the score to -1.0 on a single noisy round.
-        cid_key = str(cid)
         if sim < SIM_REJECT_THRESHOLD:
             SIM_HISTORY[cid_key] = SIM_HISTORY.get(cid_key, 0) + 1
         else:
             SIM_HISTORY[cid_key] = 0
 
+        is_outlier_this_round = delta < lower or delta > upper
+        if is_outlier_this_round:
+            OUTLIER_HISTORY[cid_key] = OUTLIER_HISTORY.get(cid_key, 0) + 1
+        else:
+            OUTLIER_HISTORY[cid_key] = 0
+
         if SIM_HISTORY.get(cid_key, 0) >= CONSECUTIVE_REQUIRED or (rejected_clients and cid_key in rejected_clients):
             combined_score = -1.0
             status = "rejected"
-        elif delta < lower or delta > upper:
-            # FIX: softened from a flat -0.2 since with N=5 this fires on noise often.
-            combined_score -= 0.1
-            status = "outlier"
-
-        final_score = max(-1.0, min(1.0, combined_score))
-        reputation = update_reputation(cid, final_score)
-
-        print(f"[Client {cid}] Δ={delta:.4f} | Sim={sim:.4f} | Score={final_score:.4f} | Rep={reputation:.4f} | {status}")
-
-        results[cid] = {
-            "delta": float(delta),
-            "similarity": float(sim),
-            "score": float(final_score),
-            "status": status,
-            "reputation": reputation
-        }
-
-    return results, Q1, Q3
-
-    delta_dict = {}
-    sim_dict = {}
-
-    for cid, weights in client_weights_dict.items():
-        delta_dict[cid] = compute_delta(global_weights, weights)
-        sim_dict[cid] = cosine_similarity(global_weights, weights)
-
-    deltas = list(delta_dict.values())
-    accs = [info["test_acc"] for info in clients_info]
-    losses = [info["test_loss"] for info in clients_info]
-
-    Q1, Q3, lower, upper = compute_quartiles(deltas)
-    mean_delta = np.mean(deltas) + 1e-8
-    max_acc, min_acc = max(accs), min(accs)
-    max_loss, min_loss = max(losses), min(losses)
-
-    results = {}
-
-    for i, info in enumerate(clients_info):
-        cid = info["client_id"]
-        delta = delta_dict[cid]
-        sim = sim_dict[cid]
-        
-        score_sim = sim
-        norm_delta = min(delta / mean_delta, 3.0)
-        score_delta = 1.0 - (norm_delta / 3.0)
-        
-        acc_norm = (info["test_acc"] - min_acc) / (max_acc - min_acc + 1e-8)
-        loss_norm = (info["test_loss"] - min_loss) / (max_loss - min_loss + 1e-8)
-        
-        combined_score = (0.4 * score_sim) + (0.3 * score_delta) + (0.3 * acc_norm) - (0.2 * loss_norm)
-        
-        status = "normal"
-        if sim < 0.1 or (rejected_clients and str(cid) in rejected_clients):
-            combined_score = -1.0
-            status = "rejected"
-        elif delta < lower or delta > upper:
+        elif OUTLIER_HISTORY.get(cid_key, 0) >= OUTLIER_CONSECUTIVE_REQUIRED:
+            # FIX: outlier penalty now also requires repeated offenses,
+            # not a single noisy IQR round (N=5 quartiles are unstable).
             combined_score -= 0.2
             status = "outlier"
-            
+        elif is_outlier_this_round:
+            # Single-round flag: log it, but apply only a token penalty
+            # instead of the full -0.2.
+            combined_score -= 0.05
+            status = "outlier_watch"
+
         final_score = max(-1.0, min(1.0, combined_score))
         reputation = update_reputation(cid, final_score)
 
