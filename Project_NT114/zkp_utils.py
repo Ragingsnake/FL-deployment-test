@@ -1,181 +1,173 @@
 import hashlib
 import json
 import os
-import secrets
-import time
+import subprocess
+import tempfile
+import urllib.error
+import urllib.request
 
-import requests
 
+FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+ZK_VECTOR_SIZE = int(os.environ.get("ZK_VECTOR_SIZE", "128"))
+ZK_SCALE = int(os.environ.get("ZK_SCALE", "100"))
+ZK_NORM_BOUND = int(os.environ.get("ZK_NORM_BOUND", "60000"))
 
-# RFC 3526 2048-bit MODP Group. q=(p-1)/2 is prime, so Schnorr verification
-# can run in the prime-order subgroup without external proving dependencies.
-P = int(
-    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
-    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
-    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
-    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
-    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D"
-    "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F"
-    "83655D23DCA3AD961C62F356208552BB9ED529077096966D"
-    "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
-    "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9"
-    "DE2BCBF6955817183995497CEA956AE515D2261898FA0510"
-    "15728E5A8AACAA68FFFFFFFFFFFFFFFF",
-    16,
-)
-Q = (P - 1) // 2
-G = 2
-PROOF_VERSION = "schnorr-nizk-v1"
+ZKEY_PATH = os.environ.get("ZKEY_PATH", "circuit_final.zkey")
+WASM_PATH = os.environ.get("WASM_PATH", "prove_gradient_norm_js/prove_gradient_norm.wasm")
+VK_PATH = os.environ.get("VK_PATH", "verification_key.json")
+WITNESS_JS = os.environ.get("WITNESS_JS", "prove_gradient_norm_js/generate_witness.js")
 ZKP_NODE_URL = os.environ.get("ZKP_NODE_URL", "").rstrip("/")
-ZKP_NODE_TIMEOUT = float(os.environ.get("ZKP_NODE_TIMEOUT", "30"))
-ZKP_NODE_RETRIES = int(os.environ.get("ZKP_NODE_RETRIES", "3"))
+ZKP_LOCAL_ONLY = os.environ.get("ZKP_LOCAL_ONLY", "0") == "1"
+ZKP_NODE_TIMEOUT = int(os.environ.get("ZKP_NODE_TIMEOUT", "300"))
 
 
-def _sha256_bytes(*parts):
-    m = hashlib.sha256()
-    for part in parts:
-        if isinstance(part, bytes):
-            m.update(part)
-        else:
-            m.update(str(part).encode("utf-8"))
-    return m.digest()
-
-
-def _challenge(statement, public_key, commitment):
-    payload = json.dumps(
-        {
-            "version": PROOF_VERSION,
-            "statement": statement,
-            "public_key": str(public_key),
-            "commitment": str(commitment),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return int.from_bytes(_sha256_bytes(payload), "big") % Q
-
-
-def hash_model(parameters):
-    m = hashlib.sha256()
-    for p in parameters:
-        m.update(str(p.dtype).encode("utf-8"))
-        m.update(str(p.shape).encode("utf-8"))
-        m.update(p.tobytes())
-    return m.hexdigest()
-
-
-def build_statement(parameters, client_id=None, round_num=None, cid=None):
-    return {
-        "model_hash": hash_model(parameters),
-        "client_id": str(client_id) if client_id is not None else "",
-        "round": int(round_num) if round_num is not None else 0,
-        "cid": str(cid) if cid is not None else "",
-    }
+def canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def canonical_proof_json(proof):
-    return json.dumps(proof, sort_keys=True, separators=(",", ":"))
+    return canonical_json(proof)
 
 
 def proof_hash(proof):
     return hashlib.sha256(canonical_proof_json(proof).encode("utf-8")).hexdigest()
 
 
-def _generate_statement_proof(statement):
-    secret = secrets.randbelow(Q - 1) + 1
-    public_key = pow(G, secret, P)
+def hash_model(parameters):
+    digest = hashlib.sha256()
+    for p in parameters:
+        digest.update(str(p.dtype).encode("utf-8"))
+        digest.update(str(p.shape).encode("utf-8"))
+        digest.update(p.tobytes())
+    return int(digest.hexdigest(), 16) % FIELD_MODULUS
 
-    nonce = secrets.randbelow(Q - 1) + 1
-    commitment = pow(G, nonce, P)
-    challenge = _challenge(statement, public_key, commitment)
-    response = (nonce + challenge * secret) % Q
 
+def _public_signals(parameters, client_id, round_num, norm_bound=None):
+    return [
+        str(hash_model(parameters)),
+        str(int(client_id)),
+        str(int(round_num)),
+        str(int(norm_bound if norm_bound is not None else ZK_NORM_BOUND)),
+    ]
+
+
+def _gradient_witness(parameters):
+    values = []
+    for layer in parameters:
+        values.extend(layer.flatten())
+
+    gradient = [abs(int(round(float(x) * ZK_SCALE))) for x in values[:ZK_VECTOR_SIZE]]
+    while len(gradient) < ZK_VECTOR_SIZE:
+        gradient.append(0)
+    return gradient
+
+
+def build_input(parameters, client_id, round_num, norm_bound=None):
+    bound = int(norm_bound if norm_bound is not None else ZK_NORM_BOUND)
     return {
-        "version": PROOF_VERSION,
-        "group": "rfc3526-2048-modp",
-        "statement": statement,
-        "public_key": str(public_key),
-        "commitment": str(commitment),
-        "response": str(response),
+        "gradient": _gradient_witness(parameters),
+        "model_hash": int(hash_model(parameters)),
+        "client_id": int(client_id),
+        "round_num": int(round_num),
+        "norm_bound": bound,
     }
 
 
-def _verify_statement_proof(statement, proof):
-    if not isinstance(proof, dict):
-        return False
+def _node_post(path, payload):
+    if not ZKP_NODE_URL:
+        raise RuntimeError("ZKP_NODE_URL is not configured")
 
+    request = urllib.request.Request(
+        f"{ZKP_NODE_URL}{path}",
+        data=canonical_json(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
-        if proof.get("version") != PROOF_VERSION:
-            return False
+        with urllib.request.urlopen(request, timeout=ZKP_NODE_TIMEOUT) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"ZKP node {path} failed: HTTP {exc.code}: {body}") from exc
 
-        if proof.get("statement") != statement:
-            return False
 
-        public_key = int(proof["public_key"])
-        commitment = int(proof["commitment"])
-        response = int(proof["response"])
+def _local_generate(input_json):
+    with tempfile.TemporaryDirectory() as tmp:
+        inp = os.path.join(tmp, "input.json")
+        wit = os.path.join(tmp, "witness.wtns")
+        prf = os.path.join(tmp, "proof.json")
+        pub = os.path.join(tmp, "public.json")
 
-        if not (1 < public_key < P - 1 and 1 < commitment < P - 1 and 0 <= response < Q):
-            return False
+        with open(inp, "w", encoding="utf-8") as f:
+            json.dump(input_json, f)
 
-        # Enforce subgroup membership to avoid small-subgroup tricks.
-        if pow(public_key, Q, P) != 1 or pow(commitment, Q, P) != 1:
-            return False
+        subprocess.run(["node", WITNESS_JS, WASM_PATH, inp, wit], check=True)
+        subprocess.run(["snarkjs", "groth16", "prove", ZKEY_PATH, wit, prf, pub], check=True)
 
-        challenge = _challenge(statement, public_key, commitment)
-        left = pow(G, response, P)
-        right = (commitment * pow(public_key, challenge, P)) % P
-        return left == right
-    except (KeyError, TypeError, ValueError):
+        with open(prf, "r", encoding="utf-8") as f:
+            proof = json.load(f)
+        with open(pub, "r", encoding="utf-8") as f:
+            public = json.load(f)
+
+    return {"proof": proof, "public": [str(x) for x in public]}
+
+
+def _local_verify(proof_data):
+    with tempfile.TemporaryDirectory() as tmp:
+        prf = os.path.join(tmp, "proof.json")
+        pub = os.path.join(tmp, "public.json")
+
+        with open(prf, "w", encoding="utf-8") as f:
+            json.dump(proof_data["proof"], f)
+        with open(pub, "w", encoding="utf-8") as f:
+            json.dump(proof_data["public"], f)
+
+        result = subprocess.run(
+            ["snarkjs", "groth16", "verify", VK_PATH, pub, prf],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    return result.returncode == 0 and "OK" in result.stdout
+
+
+def generate_proof(parameters, client_id=None, round_num=None, cid=None, norm_bound=None):
+    input_json = build_input(parameters, client_id, round_num, norm_bound)
+
+    if ZKP_NODE_URL and not ZKP_LOCAL_ONLY:
+        result = _node_post("/prove", {"input": input_json})
+        proof_data = result.get("proof_data")
+        if not proof_data:
+            raise RuntimeError(f"ZKP node returned no proof_data: {result}")
+    else:
+        proof_data = _local_generate(input_json)
+
+    expected_public = [
+        str(input_json["model_hash"]),
+        str(input_json["client_id"]),
+        str(input_json["round_num"]),
+        str(input_json["norm_bound"]),
+    ]
+    if [str(x) for x in proof_data.get("public", [])] != expected_public:
+        raise RuntimeError("Generated zkSNARK public signals do not match the submitted update")
+
+    proof_data["backend"] = "groth16"
+    return proof_data
+
+
+def verify_proof(parameters, proof_data, client_id=None, round_num=None, cid=None, norm_bound=None):
+    if not isinstance(proof_data, dict):
+        return False
+    if "proof" not in proof_data or "public" not in proof_data:
         return False
 
+    expected_public = _public_signals(parameters, client_id, round_num, norm_bound)
+    if [str(x) for x in proof_data.get("public", [])] != expected_public:
+        return False
 
-def _call_zkp_node(path, payload):
-    last_error = None
-    for attempt in range(1, ZKP_NODE_RETRIES + 1):
-        try:
-            response = requests.post(
-                f"{ZKP_NODE_URL}{path}",
-                json=payload,
-                timeout=ZKP_NODE_TIMEOUT,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as exc:
-            last_error = exc
-            if attempt < ZKP_NODE_RETRIES:
-                time.sleep(min(2 ** (attempt - 1), 5))
-    raise RuntimeError(last_error)
+    if ZKP_NODE_URL and not ZKP_LOCAL_ONLY:
+        result = _node_post("/verify", {"proof_data": proof_data})
+        return bool(result.get("valid"))
 
-
-def generate_proof(parameters, client_id=None, round_num=None, cid=None):
-    statement = build_statement(parameters, client_id, round_num, cid)
-
-    if ZKP_NODE_URL:
-        try:
-            result = _call_zkp_node("/prove", {"statement": statement})
-            return result["proof"]
-        except Exception as exc:
-            raise RuntimeError(f"ZKP node proof generation failed: {exc}") from exc
-
-    return _generate_statement_proof(statement)
-
-
-def verify_proof(parameters, proof, client_id=None, round_num=None, cid=None):
-    statement = build_statement(parameters, client_id, round_num, cid)
-
-    if ZKP_NODE_URL:
-        try:
-            result = _call_zkp_node(
-                "/verify",
-                {
-                    "statement": statement,
-                    "proof": proof,
-                },
-            )
-            return bool(result.get("valid"))
-        except Exception as exc:
-            print(f"ZKP node verification failed: {exc}")
-            return False
-
-    return _verify_statement_proof(statement, proof)
+    return _local_verify(proof_data)

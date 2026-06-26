@@ -1,3 +1,5 @@
+import copy
+
 import flwr as fl
 import torch
 import torch.nn as nn
@@ -26,12 +28,15 @@ def _parse_client_ids(value):
 
 
 def _tamper_proof(proof):
-    bad_proof = dict(proof)
-    bad_statement = dict(bad_proof.get("statement", {}))
-    bad_statement["model_hash"] = "invalid-demo-proof"
-    bad_proof["statement"] = bad_statement
-    return bad_proof
+    bad_proof = copy.deepcopy(proof)
 
+    if "public" in bad_proof and len(bad_proof["public"]) > 0:
+        bad_proof["public"][0] = str(
+            (int(bad_proof["public"][0]) + 1)
+            % 21888242871839275222246405745257275088548364400416034343698204186575808495617
+        )
+
+    return bad_proof
 
 def _demo_enabled(client_id, round_num, clients_env, start_env, end_env):
     clients = _parse_client_ids(os.environ.get(clients_env, ""))

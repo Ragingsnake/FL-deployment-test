@@ -1,17 +1,16 @@
 import json
 import os
+import shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from zkp_utils import (
-    PROOF_VERSION,
-    _generate_statement_proof,
-    _verify_statement_proof,
-)
+os.environ["ZKP_LOCAL_ONLY"] = "1"
+
+from zkp_utils import VK_PATH, WASM_PATH, WITNESS_JS, ZKEY_PATH, _local_generate, _local_verify  # noqa: E402
 
 
 HOST = os.environ.get("ZKP_NODE_HOST", "0.0.0.0")
 PORT = int(os.environ.get("ZKP_NODE_PORT", "8090"))
-BACKEND = os.environ.get("ZKP_BACKEND", PROOF_VERSION)
+BACKEND = os.environ.get("ZKP_BACKEND", "groth16")
 
 
 class ZKPHandler(BaseHTTPRequestHandler):
@@ -19,6 +18,23 @@ class ZKPHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/healthz":
+            missing = [
+                path
+                for path in (ZKEY_PATH, VK_PATH, WASM_PATH, WITNESS_JS)
+                if not os.path.exists(path)
+            ]
+            missing_tools = [tool for tool in ("node", "snarkjs") if shutil.which(tool) is None]
+            if missing or missing_tools:
+                self._send_json(
+                    {
+                        "status": "error",
+                        "backend": BACKEND,
+                        "missing_files": missing,
+                        "missing_tools": missing_tools,
+                    },
+                    status=503,
+                )
+                return
             self._send_json({"status": "ok", "backend": BACKEND})
             return
         self._send_json({"error": "not found"}, status=404)
@@ -44,23 +60,20 @@ class ZKPHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             raise ValueError("missing request body")
-        raw = self.rfile.read(length)
-        return json.loads(raw.decode("utf-8"))
+        return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _handle_prove(self, payload):
-        statement = payload.get("statement")
-        if not isinstance(statement, dict):
-            raise ValueError("statement must be an object")
-        proof = _generate_statement_proof(statement)
-        self._send_json({"backend": BACKEND, "proof": proof})
+        input_json = payload.get("input")
+        if not isinstance(input_json, dict):
+            raise ValueError("input must be an object")
+        proof_data = _local_generate(input_json)
+        self._send_json({"backend": BACKEND, "proof_data": proof_data})
 
     def _handle_verify(self, payload):
-        statement = payload.get("statement")
-        proof = payload.get("proof")
-        if not isinstance(statement, dict):
-            raise ValueError("statement must be an object")
-        valid = _verify_statement_proof(statement, proof)
-        self._send_json({"backend": BACKEND, "valid": valid})
+        proof_data = payload.get("proof_data")
+        if not isinstance(proof_data, dict):
+            raise ValueError("proof_data must be an object")
+        self._send_json({"backend": BACKEND, "valid": _local_verify(proof_data)})
 
     def _send_json(self, payload, status=200):
         body = json.dumps(payload, sort_keys=True).encode("utf-8")

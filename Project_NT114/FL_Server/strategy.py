@@ -70,7 +70,11 @@ class SecureFLStrategy(fl.server.strategy.FedAvg):
             print(f"\nClient {cid} update received")
 
             start = time.time()
-            verified = verify_proof(params, proof, client_id=cid, round_num=server_round, cid=model_cid)
+            try:
+                verified = verify_proof(params, proof, client_id=cid, round_num=server_round, cid=model_cid)
+            except Exception as exc:
+                print(f"ZKP verification error for Client {cid}: {exc}")
+                verified = False
             round_verify_times.append(time.time() - start)
 
             if not verified:

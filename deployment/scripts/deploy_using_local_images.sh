@@ -96,7 +96,7 @@ kubectl -n blockchain wait --for=condition=complete job/contract-migrate --timeo
 
 kubectl apply -f /tmp/k8s-rendered/30-server.yaml
 kubectl -n aggregation rollout status deploy/fl-server --timeout=5m
-kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
+# kubectl apply -f /tmp/k8s-rendered/40-clients.yaml
 
 echo
 echo "Deployment complete."

@@ -75,7 +75,17 @@ spec:
           ports:
             - { name: http, containerPort: 8090 }
           env:
-            - { name: ZKP_BACKEND, value: "schnorr-nizk-v1" }
+            - name: ZKP_BACKEND
+              value: "groth16"
+
+            - name: ZKEY_PATH
+              value: "/app/circuit_final.zkey"
+
+            - name: VK_PATH
+              value: "/app/verification_key.json"
+
+            - name: WASM_PATH
+              value: "/app/prove_gradient_norm_js/prove_gradient_norm.wasm"
           readinessProbe:
             httpGet: { path: /healthz, port: 8090 }
             initialDelaySeconds: 3

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-contract Reputation {
+import "./ReputationVerifier.sol";
+
+contract Reputation is Groth16Verifier {
 
     struct Update {
         uint round;
@@ -84,6 +86,51 @@ contract Reputation {
                         reputation[clientId] -= 1;
                     }
 
+                }
+
+                emit UpdateVerified(
+                    round,
+                    clientId,
+                    result
+                );
+
+                break;
+            }
+        }
+    }
+
+    function verifyUpdateProof(
+        uint clientId,
+        uint round,
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[4] calldata publicSignals
+    ) public {
+
+        require(publicSignals[1] == clientId, "client mismatch");
+        require(publicSignals[2] == round, "round mismatch");
+
+        bool result = verifyProof(
+            a,
+            b,
+            c,
+            publicSignals
+        );
+
+        for (uint i = 0; i < updates.length; i++) {
+
+            if (
+                updates[i].clientId == clientId &&
+                updates[i].round == round
+            ) {
+
+                updates[i].verified = result;
+
+                if (result) {
+                    reputation[clientId] += 1;
+                } else if (reputation[clientId] > 0) {
+                    reputation[clientId] -= 1;
                 }
 
                 emit UpdateVerified(

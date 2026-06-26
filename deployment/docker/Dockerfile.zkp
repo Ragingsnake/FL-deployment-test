@@ -2,6 +2,10 @@ FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
+RUN apt-get update && \
+    apt-get install -y nodejs npm && \
+    npm install -g snarkjs
+
 RUN python -m venv /opt/venv
 
 ENV PATH=/opt/venv/bin:$PATH
@@ -11,9 +15,17 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 COPY zkp_node.py zkp_utils.py ./
 
+COPY circuit_final.zkey ./
+COPY verification_key.json ./
+COPY prove_gradient_norm_js ./prove_gradient_norm_js
+
 FROM python:3.10-slim
 
 WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y nodejs npm && \
+    npm install -g snarkjs
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
@@ -22,7 +34,7 @@ ENV PYTHONUNBUFFERED=1 \
     ZKP_NODE_PORT=8090
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /app/zkp_node.py /app/zkp_utils.py /app/
+COPY --from=builder /app /app
 
 EXPOSE 8090
 

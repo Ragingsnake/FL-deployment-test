@@ -63,7 +63,7 @@ module.exports = {
       port: 8545,
       network_id: "1337",
       from: undefined,
-      gas: 6000000
+      gas: 8000000
     },
 
     // Useful for testing. The `development` name is special - truffle uses it by default
