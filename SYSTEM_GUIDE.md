@@ -2,34 +2,47 @@
 
 This guide explains what the system does, how the pieces fit together, how to operate it on cloud infrastructure, and how to interpret the results. It is written for the current repository layout and Kubernetes deployment in this workspace.
 
+---
+
 ## 1. What This System Offers
 
-This project is a cloud-deployed federated learning system with supporting verification, storage, and audit layers:
+This project is a cloud-deployed federated learning system with supporting verification, storage, defense, and audit layers:
 
 | Capability | What it gives you |
 |------------|-------------------|
 | Federated learning | Multiple clients train locally on IID or non-IID EMNIST splits without centralizing raw training data. |
 | Secure aggregation policy | The server verifies update proofs, evaluates client quality, weights accepted updates, and applies FedAdam. |
-| ZKP node | A dedicated proof service receives `/prove` and `/verify` requests. It is the boundary where actual zkSNARK proving can be plugged in later. |
+| ZKP node | A dedicated proof service receives `/prove` and `/verify` requests. Uses Groth16 zkSNARK with a gradient norm bound circuit. |
+| On-chain ZKP verification | Proofs can be verified directly on the Ethereum smart contract (trustless, no server bias). |
 | IPFS storage | Client model files are uploaded to IPFS and referenced by CID instead of being stored directly on-chain. |
-| Blockchain audit trail | A private Ethereum PoA chain records update metadata, proof hashes, verification outcomes, and contract-level reputation counters. |
+| Blockchain audit trail | A private Ethereum PoA chain records update metadata, proof hashes, verification outcomes, and reputation counters. |
+| Staking & slashing | Clients stake ETH to participate; consecutive failures trigger stake slashing. Rewards are distributed based on contribution. |
 | Reputation and defense | The server scores clients from similarity, weight delta, local accuracy, local loss, and rejection status. |
+| Byzantine-resilient aggregation | Pluggable aggregators: Multi-Krum, Trimmed Mean, Bulyan, RFA (geometric median), alongside the default reputation-weighted method. |
+| Advanced attack framework | Backdoor, free-rider, Sybil, collusion, and sign-flip attacks for benchmarking defenses. |
+| Secure aggregation | Additive masking hides individual client updates from the server while preserving aggregate correctness. |
+| Training verification | Cryptographic commitments prove clients actually trained (loss decreased) to detect free-riders. |
 | Charts and histories | The server writes mode-specific history JSON files and automatically generates plots after training. |
-| Demo controls | You can demonstrate poisoned/faulty clients and invalid ZKP proofs with client-side environment variables. |
 
 The high-level shape is:
 
 ```text
 FL clients train locally
+  -> compute training commitment (loss before/after)
   -> upload model file to IPFS
-  -> ask ZKP node to prove update statement
-  -> send model parameters + CID + proof to FL server
-  -> server asks ZKP node to verify proof
+  -> ask ZKP node to prove gradient norm bound
+  -> (optional) mask update with secure aggregation
+  -> send model parameters + CID + proof + commitment to FL server
+  -> server verifies ZKP proof (off-chain via node, OR on-chain via contract)
   -> server records verification on blockchain
-  -> server scores/reweights clients
-  -> server aggregates accepted updates
+  -> server scores/reweights clients (reputation)
+  -> server aggregates using selected method (reputation-weighted / Krum / Trimmed Mean / Bulyan / RFA)
+  -> server applies FedAdam to update global model
+  -> (optional) server distributes staking rewards
   -> server writes history and charts
 ```
+
+---
 
 ## 2. Cloud Infrastructure
 
@@ -43,16 +56,6 @@ The deployment targets Azure Kubernetes Service. The scripts create or use:
 | Azure managed disks / PVCs | Persist IPFS data, geth chain data, server histories, and generated plots. |
 | Kubernetes ConfigMaps | Share the deployed smart contract address with server and clients. |
 
-The default deploy scripts are:
-
-| Script | Best use |
-|--------|----------|
-| `deployment/scripts/deploy.sh` | Fresh clone/build/deploy from configured repo URL. |
-| `deployment/scripts/deploy_using_existing.sh` | Deploy from the local `Project_NT114` checkout. This is the safest script for your current workflow. |
-| `deployment/scripts/deploy_using_local_images.sh` | Use existing cached/local/Docker Hub images and deploy manifests. |
-| `deployment/scripts/build_and_push_dockerhub.sh` | Build all four images and push to Docker Hub. |
-| `deployment/scripts/pull-outputs.sh` | Copy generated charts and history JSON files from the server pod. |
-
 The Kubernetes namespaces are:
 
 | Namespace | Workloads |
@@ -62,16 +65,59 @@ The Kubernetes namespaces are:
 | `ipfs` | Single Kubo IPFS StatefulSet and PVC. |
 | `blockchain` | Geth StatefulSet, Truffle migration Job, ZKP node Deployment. |
 
-Code and manifest references:
+---
 
-- Namespaces: `deployment/k8s/00-namespaces.yaml`
-- IPFS: `deployment/k8s/10-ipfs.yaml`
-- Geth, migration Job, ZKP node: `deployment/k8s/20-blockchain.yaml`
-- FL server: `deployment/k8s/30-server.yaml`
-- FL clients: `deployment/k8s/40-clients.yaml`
-- Dockerfiles: `deployment/docker/`
+## 3. Complete Environment Variable Reference
 
-## 3. Federated Learning
+### Server-Side Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FL_ROUNDS` | `40` | Number of federated learning rounds. |
+| `NUM_CLIENTS` | `5` | Number of FL clients. |
+| `SPLIT_TYPE` | `non_iid` | Data split type: `iid` or `non_iid`. |
+| `FL_STRATEGY` | `secure` | Strategy: `secure` (SecureFLStrategy) or `fedavg` (SimpleFLStrategy). |
+| `AGGREGATION_METHOD` | `reputation` | Aggregation algorithm: `reputation`, `krum`, `trimmed_mean`, `bulyan`, `rfa`. |
+| `NUM_BYZANTINE` | `1` | Assumed number of Byzantine clients (for Krum/Bulyan). |
+| `TRIM_RATIO` | `0.1` | Fraction to trim in Trimmed Mean aggregator. |
+| `RFA_CLIP_NORM` | `1.0` | Per-update norm clip for RFA. |
+| `VERIFICATION_MODE` | `off-chain` | ZKP verification: `off-chain` (via ZKP node) or `on-chain` (via smart contract). |
+| `STAKING_ENABLED` | `0` | Enable staking/slashing contract: `0` or `1`. |
+| `SECURE_AGG_ENABLED` | `0` | Enable secure aggregation masking: `0` or `1`. |
+| `TRAINING_VERIFICATION_ENABLED` | `0` | Enable training correctness commitments: `0` or `1`. |
+| `FEDADAM_LR` | `0.0007` | FedAdam server learning rate. |
+| `ETH_RPC` | `http://127.0.0.1:7545` | Ethereum RPC endpoint. |
+| `REPUTATION_ADDRESS` | *(from ConfigMap)* | Deployed Reputation contract address. |
+| `STAKING_ADDRESS` | *(from ConfigMap)* | Deployed StakingReputation contract address. |
+
+### Client-Side Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FL_SERVER_HOST` | `localhost` | FL server hostname. |
+| `FL_SERVER_PORT` | `8080` | FL server port. |
+| `CLIENT_LR` | `0.0005` | Local Adam learning rate. |
+| `LOCAL_EPOCHS` | `2` | Local training epochs per round. |
+| `FEDPROX_MU` | `0.001` | FedProx regularization strength. |
+| `IPFS_API` | `/ip4/127.0.0.1/tcp/5001` | IPFS API multiaddr. |
+| `ZKP_NODE_URL` | *(empty)* | URL of the ZKP node service. |
+
+### Demo Attack Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEMO_FAULTY_CLIENTS` | *(empty)* | Comma-separated client IDs for noise injection. |
+| `DEMO_FAULTY_NOISE_SCALE` | `0.01` | Noise magnitude for faulty attack. |
+| `DEMO_BAD_ZKP_CLIENTS` | *(empty)* | Comma-separated client IDs for ZKP tampering. |
+| `DEMO_ATTACK_TYPE` | *(empty)* | Advanced attack: `backdoor`, `freerider`, `sybil`, `collusion`, `signflip`. |
+| `DEMO_ATTACK_CLIENTS` | *(empty)* | Comma-separated client IDs for advanced attacks. |
+| `DEMO_ATTACK_START_ROUND` | `1` | First round to activate the attack. |
+| `DEMO_ATTACK_END_ROUND` | `999999` | Last round to activate the attack. |
+| `DEMO_ATTACK_SCALE` | *(varies)* | Attack intensity (meaning varies per attack type). |
+
+---
+
+## 4. Federated Learning
 
 Federated learning trains a shared model by sending model updates instead of raw data. Each client owns its local dataset, trains locally, and returns updated parameters to the server.
 
@@ -79,360 +125,236 @@ In this system:
 
 1. The server starts a Flower training round.
 2. Each client receives the current global model.
-3. Each client trains locally using its local EMNIST split.
+3. Each client trains locally using its local EMNIST split (with FedProx regularization).
 4. Each client returns updated parameters and metrics.
 5. The server verifies, scores, and aggregates accepted updates.
+
+The client model is a lightweight CNN in `model.py`:
+- 2 convolutional layers (32 and 64 filters)
+- Max pooling and dropout
+- 2 fully connected layers (128 hidden, 62 output for EMNIST ByClass)
 
 Code path:
 
 | Step | Code |
 |------|------|
-| Server entrypoint | `Project_NT114/fl_server.py` |
-| Server strategy | `Project_NT114/FL_Server/strategy.py` |
-| Client entrypoint | `Project_NT114/fl_client.py` |
-| Flower client implementation | `Project_NT114/FL_Client/Flower.py` |
-| Local training | `Project_NT114/FL_Client/train.py` |
-| Local evaluation | `Project_NT114/FL_Client/evaluate.py` |
-| Model architecture | `Project_NT114/model.py` |
-| Dataset loading | `Project_NT114/utils.py` |
+| Server entrypoint | `fl_server.py` |
+| Server strategy | `FL_Server/strategy.py` |
+| Client entrypoint | `fl_client.py` |
+| Flower client | `FL_Client/Flower.py` |
+| Local training | `FL_Client/train.py` |
+| Local evaluation | `FL_Client/evaluate.py` |
+| Model architecture | `model.py` |
+| Dataset loading | `utils.py` |
 
-The client model is a lightweight CNN in `model.py`. Local training uses:
+---
 
-- Adam optimizer.
-- FedProx regularization.
-- `LOCAL_EPOCHS`, default `2`.
-- `CLIENT_LR`, default `0.0005`.
-- `FEDPROX_MU`, default `0.001`.
-- `FEDPROX_EVERY_N_BATCHES`, default `5`.
+## 5. ZKP: Groth16 zkSNARK Gradient Norm Proof
 
-The server uses FedAdam in:
+### What it proves
 
-- `Project_NT114/FL_Server/fedadam.py`
-- `Project_NT114/FL_Server/config.py`
+The Circom circuit (`prove_gradient_norm.circom`) proves:
 
-## 4. IID vs Non-IID Modes
+```
+"The L2 norm of my gradient update is at most norm_bound,
+ and the public metadata (model_hash, client_id, round_num) matches."
+```
 
-The system supports both IID and non-IID data splits.
+This prevents gradient explosion/poisoning attacks where a malicious client sends an update with enormous magnitude.
 
-| Mode | Meaning |
-|------|---------|
-| IID | Each client sees a more similar data distribution. Training tends to be smoother. |
-| non-IID | Clients see different/skewed distributions. This is more realistic and usually harder. |
+### Public signals (verifiable by anyone)
 
-The mode is controlled by `SPLIT_TYPE`:
+| Signal | Meaning |
+|--------|---------|
+| `model_hash` | Hash of submitted model parameters (field element). |
+| `client_id` | Client identity. |
+| `round_num` | FL round number. |
+| `norm_bound` | Maximum allowed gradient norm (scaled integer). |
+
+### Private witness (known only to the client)
+
+| Input | Meaning |
+|-------|---------|
+| `gradient[128]` | First 128 gradient values (quantized, scaled). |
+
+### Verification modes
+
+| Mode | How it works |
+|------|-------------|
+| `off-chain` (default) | Client calls `zkp-node /prove`, server calls `zkp-node /verify`. Fast but requires trusting the server. |
+| `on-chain` | Proof is submitted to `Reputation.verifyUpdateProof()` or `StakingReputation.verifyUpdateWithProof()`. The EVM verifies using elliptic curve pairing precompiles. Trustless. |
+
+Set `VERIFICATION_MODE=on-chain` to enable trustless verification.
+
+---
+
+## 6. Byzantine Attack Framework
+
+### Available attacks
+
+| Attack | Env `DEMO_ATTACK_TYPE` | Description |
+|--------|----------------------|-------------|
+| **Backdoor** | `backdoor` | Modifies last FC layer to misclassify source_label as target_label. Stays within norm bounds. |
+| **Free-rider** | `freerider` | Returns global model + tiny noise. Contributes nothing but receives aggregated model. |
+| **Sybil** | `sybil` | Coordinated drift toward a cached random direction. Cumulative effect across multiple clients. |
+| **Collusion** | `collusion` | Shifts updates within IQR bounds toward an adversarial direction. Hard to detect individually. |
+| **Sign-flip** | `signflip` | Negates parameters, pushing model away from convergence. |
+| **Noise (legacy)** | *(use `DEMO_FAULTY_CLIENTS`)* | Adds Gaussian noise to parameters. |
+| **Bad ZKP (legacy)** | *(use `DEMO_BAD_ZKP_CLIENTS`)* | Tampers with ZKP proof to trigger rejection. |
+
+### Example: Run backdoor attack on clients 2,3 during rounds 5-15
 
 ```bash
-SPLIT_TYPE=non_iid FL_ROUNDS=40 bash deployment/scripts/deploy_using_existing.sh
-SPLIT_TYPE=iid FL_ROUNDS=40 bash deployment/scripts/deploy_using_existing.sh
+DEMO_ATTACK_TYPE=backdoor \
+DEMO_ATTACK_CLIENTS=2,3 \
+DEMO_ATTACK_START_ROUND=5 \
+DEMO_ATTACK_END_ROUND=15 \
+DEMO_ATTACK_SCALE=0.15 \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-Data is loaded from:
+---
 
-```text
-Project_NT114/data_new/iid/client_0.pkl
-Project_NT114/data_new/non_iid/client_0.pkl
-...
+## 7. Byzantine-Resilient Aggregation
+
+### Available aggregators
+
+| Method | Env `AGGREGATION_METHOD` | Reference |
+|--------|------------------------|-----------|
+| **Reputation-weighted** (default) | `reputation` | Custom: cosine similarity + delta + accuracy scoring with FedAdam. |
+| **Multi-Krum** | `krum` | Blanchard et al., NeurIPS 2017. Selects updates closest to neighbors. |
+| **Trimmed Mean** | `trimmed_mean` | Yin et al., ICML 2018. Coordinate-wise sorting and trimming. |
+| **Bulyan** | `bulyan` | El Mhamdi et al., ICML 2018. Iterative Krum + trimmed mean. |
+| **RFA (Geometric Median)** | `rfa` | Pillutla et al., IEEE TPAMI 2022. Weiszfeld's algorithm. |
+
+### Example: Compare Krum vs default
+
+```bash
+# Run with Krum
+AGGREGATION_METHOD=krum NUM_BYZANTINE=1 \
+SPLIT_TYPE=non_iid FL_ROUNDS=40 \
+bash deployment/scripts/deploy_using_existing.sh
+
+# Run with default reputation-weighted
+AGGREGATION_METHOD=reputation \
+SPLIT_TYPE=non_iid FL_ROUNDS=40 \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-Code path:
+---
 
-- `Project_NT114/fl_client.py` receives `<client_id> <iid|non_iid>`.
-- `Project_NT114/FL_Client/Flower.py` passes the split type to `load_client_data`.
-- `Project_NT114/utils.py` loads `data_new/<split_type>/client_<id>.pkl`.
+## 8. Staking & Slashing (Game-Theoretic Incentive)
 
-## 5. ZKP: What It Is and What This System Does
+### Smart contract: `StakingReputation.sol`
 
-ZKP means zero-knowledge proof. A ZKP lets one party prove a statement is valid without revealing private information beyond the statement itself.
+| Feature | Detail |
+|---------|--------|
+| **Registration** | Clients call `registerClient()` with `>= 0.01 ETH` stake. |
+| **Reputation** | Starts at 100, incremented by 10 on success, decremented by 20 on failure. Max 200. |
+| **Slashing** | After 3 consecutive verification failures, 30% of stake is slashed. |
+| **Rewards** | Aggregator distributes rewards proportional to reputation (Shapley-value proxy). |
+| **Withdrawal** | Clients can withdraw stake if reputation >= 50. Rewards are always withdrawable. |
 
-In theory, a training-update ZKP could prove something like:
+### Enable staking
 
-```text
-I produced this model update by running the agreed training computation
-over private local data, and the public hash/CID/round metadata matches.
+```bash
+STAKING_ENABLED=1 \
+STAKING_ADDRESS=<deployed_address> \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-That full statement is expensive and normally requires an actual zkSNARK circuit.
+---
 
-### Current implementation
+## 9. Secure Aggregation
 
-The current system uses a dedicated ZKP node and a Schnorr-style non-interactive proof backend. This is a real proof boundary, but it is not yet a full Groth16/Plonk zkSNARK training circuit.
+When `SECURE_AGG_ENABLED=1`:
 
-The important design win is that the FL code now talks to a service:
+1. Each client generates pairwise additive masks with all peers.
+2. Masks are designed to cancel when summed: `mask_i(j) = -mask_j(i)`.
+3. Client sends `params + mask` to the server.
+4. Server sums all masked updates → masks cancel → true aggregate recovered.
+
+The server never sees individual client updates, defending against gradient inversion attacks (Deep Leakage from Gradients).
+
+**Limitation**: Currently uses deterministic shared secrets for the experimental setup. A production deployment would use Diffie-Hellman key exchange.
+
+---
+
+## 10. Training Correctness Verification
+
+When `TRAINING_VERIFICATION_ENABLED=1`:
+
+1. Client evaluates loss on training data **before** training → `loss_before`.
+2. Client trains normally → `loss_after`.
+3. Client computes a cryptographic commitment binding: global model hash, local model hash, loss_before, loss_after, epochs, learning rate.
+4. Server checks the commitment and flags if `loss_after >= loss_before` (possible free-rider).
+
+This detects clients that skip training and return the global model unchanged.
+
+---
+
+## 11. End-to-End Round Workflow (Upgraded)
 
 ```text
-POST /prove
-POST /verify
+1. fl_server.py starts Flower with SecureFLStrategy
+2. SecureFLStrategy.configure_fit sends server_round to clients
+3. Each fl_client.py pod starts a FlowerClient
+4. FlowerClient.fit:
+   a. Loads global parameters into CNN
+   b. (If TRAINING_VERIFICATION) Evaluates loss_before
+   c. Trains locally using FedProx
+   d. Saves model to models/clients/
+   e. Uploads to IPFS → CID
+   f. Gets parameters as numpy arrays
+   g. (If attack demo) Applies selected attack
+   h. Generates Groth16 ZKP proof via zkp-node
+   i. (If bad ZKP demo) Tampers proof
+   j. Submits metadata to blockchain
+   k. (If SECURE_AGG) Masks parameters
+   l. (If TRAINING_VERIFICATION) Computes training commitment
+   m. Returns params + metrics to server
+5. SecureFLStrategy.aggregate_fit:
+   a. For each client: verify ZKP (off-chain or on-chain)
+   b. Record verification on blockchain
+   c. Evaluate client quality (reputation scoring)
+   d. Select aggregation method:
+      - reputation: weighted gradients + FedAdam
+      - krum/trimmed_mean/bulyan/rfa: robust aggregator + FedAdam
+   e. Update global model
+   f. (If STAKING) Distribute rewards
+6. aggregate_evaluate: average eval results, write history JSON
+7. After training: generate plots, keep pod alive
 ```
 
-Later, the internals of `zkp-node` can be replaced with actual zkSNARK artifacts while keeping the same client/server API.
+---
 
-Code path:
+## 12. Reputation Scoring
 
-| Action | Code |
-|--------|------|
-| Client builds proof statement | `Project_NT114/zkp_utils.py::build_statement` |
-| Client requests proof | `Project_NT114/zkp_utils.py::generate_proof` |
-| ZKP service `/prove` | `Project_NT114/zkp_node.py` |
-| Server verifies proof | `Project_NT114/zkp_utils.py::verify_proof` |
-| ZKP service `/verify` | `Project_NT114/zkp_node.py` |
-
-The public statement includes:
-
-| Field | Meaning |
-|-------|---------|
-| `model_hash` | Hash of submitted model parameters. |
-| `client_id` | Client identity. |
-| `round` | FL round number. |
-| `cid` | IPFS CID for the saved model file. |
-
-The server must send the current round to clients. That happens in:
+The reputation system in `reputation.py` computes:
 
 ```text
-Project_NT114/FL_Server/strategy.py::configure_fit
+combined_score = 0.4 * cosine_similarity
+              + 0.3 * delta_score
+              + 0.3 * normalized_accuracy
+              - 0.2 * normalized_loss
 ```
 
-Without this, clients may prove `round=1` repeatedly, causing valid-looking round-1 proofs to fail from round 2 onward.
-
-### Where actual zkSNARKs would plug in
-
-The clean plug-in point is:
+Then updates reputation with EMA:
 
 ```text
-Project_NT114/zkp_node.py
-```
-
-To move to Groth16/Plonk, mount or bake circuit artifacts into the ZKP node image:
-
-- R1CS
-- WASM witness generator
-- proving key / `.zkey`
-- verification key
-
-Then replace the internals of `/prove` and `/verify`, while preserving the same JSON API used by `zkp_utils.py`.
-
-## 6. IPFS: What It Is and How We Use It
-
-IPFS is content-addressed storage. Instead of identifying a file by location, it identifies the file by content hash. That hash-like address is called a CID.
-
-In this system:
-
-1. A client saves its local model file, such as `models/clients/client2_round4.pth`.
-2. The client uploads that file to IPFS.
-3. IPFS returns a CID.
-4. The client includes that CID in its ZKP statement and blockchain submission.
-
-Code path:
-
-- `Project_NT114/FL_Client/Flower.py` saves the model file.
-- `Project_NT114/ipfs_utils.py::upload_to_ipfs` uploads it.
-- `deployment/k8s/10-ipfs.yaml` runs Kubo.
-
-Important detail: if IPFS upload fails, `ipfs_utils.py` returns a fallback local hash CID:
-
-```text
-local-<sha256>
-```
-
-That keeps training alive for development, but in a strict production demo you should treat repeated IPFS fallback CIDs as an infrastructure problem.
-
-## 7. Blockchain: What It Is and How We Use It
-
-Blockchain gives the system an append-only audit trail. This project uses a private Ethereum Proof-of-Authority geth node, not a public chain.
-
-The blockchain does not store full model parameters. It stores metadata:
-
-- Round number.
-- Client ID.
-- IPFS CID.
-- Proof hash.
-- Accuracy scaled as an integer.
-- Verification status.
-
-Code path:
-
-| Action | Code |
-|--------|------|
-| Geth image | `deployment/docker/Dockerfile.blockchain` |
-| Geth startup | `deployment/docker/geth-entrypoint.sh` |
-| Contract migration | `deployment/k8s/20-blockchain.yaml` |
-| Smart contract | `Project_NT114/contracts/Reputation.sol` |
-| Python Web3 wrapper | `Project_NT114/blockchain.py` |
-| Client submits update metadata | `blockchain.py::submit_update` |
-| Server records verification result | `blockchain.py::verify_update` |
-
-The migration Job deploys the contract, reads the deployed address, and creates the `contract-address` ConfigMap in:
-
-- `aggregation`
-- `fl-clients`
-
-The server and clients read `REPUTATION_ADDRESS` from that ConfigMap.
-
-## 8. End-to-End Round Workflow
-
-This is the core training loop.
-
-1. `fl_server.py` starts Flower with `SecureFLStrategy`.
-2. `SecureFLStrategy.configure_fit` sends `server_round` to clients.
-3. Each `fl_client.py` pod starts a `FlowerClient`.
-4. `FlowerClient.fit` loads global parameters into the CNN.
-5. `train.py` trains locally using FedProx.
-6. The client saves the model state to `models/clients/client<id>_round<round>.pth`.
-7. The client uploads the model file to IPFS and receives a CID.
-8. The client gets current model parameters and builds a public proof statement.
-9. `zkp_utils.generate_proof` calls `zkp-node /prove`.
-10. The client submits metadata to the blockchain using `submit_update`.
-11. The client returns parameters, CID, proof, local accuracy, local loss, and train time to the server.
-12. `SecureFLStrategy.aggregate_fit` receives all client updates.
-13. The server calls `zkp_utils.verify_proof`, which calls `zkp-node /verify`.
-14. If ZKP verification fails, the server rejects the update and records failure on-chain.
-15. If ZKP verification passes, the server records success on-chain and evaluates the client.
-16. `reputation.py::evaluate_clients` computes delta, cosine similarity, normalized accuracy, normalized loss, score, and reputation.
-17. The server filters very poor clients and applies IQR outlier checks.
-18. The server computes weighted gradients and applies FedAdam.
-19. `aggregate_evaluate` averages evaluation results and writes history JSON.
-20. After training, `fl_server.py` runs `plot_results.py` and keeps the pod alive for output retrieval.
-
-## 9. Reputation: Why Normal Clients Can Look Low
-
-This is a good question, and the answer is less moral than the word "reputation" makes it sound. In this system, reputation is not "is this client honest?" It is closer to "how useful and consistent did this client's update look relative to the current global model and other clients?"
-
-The main reputation calculation is in:
-
-```text
-Project_NT114/reputation.py
-```
-
-The scoring formula combines:
-
-```text
-0.4 * cosine similarity
-+ 0.3 * delta score
-+ 0.3 * normalized local accuracy
-- 0.2 * normalized local loss
-```
-
-Then it updates reputation with:
-
-```text
-new_rep = old_rep + 0.3 * (score - old_rep)
+new_rep = old_rep + 0.12 * (score - old_rep)
 new_rep = clip(new_rep, 0.1, 1.0)
 ```
 
-Reasons a normal client can have low reputation:
+Low reputation does NOT necessarily mean the client is malicious. It can mean:
+- The client has difficult/skewed non-IID data
+- The update is less aligned with the global direction
+- The client is statistically unusual compared with peers
+- The system is in early training rounds
 
-| Reason | Explanation |
-|--------|-------------|
-| Non-IID data | A client may train honestly but on a skewed label distribution. Its update can point away from the global direction. |
-| Relative scoring | Local accuracy/loss are normalized against other clients in the same round. Someone can be "normal" but still weakest in that round. |
-| Early global model instability | Early rounds have a weak global model, so deltas and similarities can be noisy. |
-| Outlier detection is statistical | IQR checks compare clients against each other. A legitimate non-IID client can look like an outlier. |
-| Reputation starts at 0.5 | The update rule is conservative. A few mediocre scores can pull reputation down quickly. |
-| Blockchain reputation is separate | The Solidity contract increments/decrements an integer verification count. The plotted server reputation is the Python-side quality score, not exactly the contract counter. |
-| ZKP only proves statement consistency | A valid proof does not mean the update is useful. It means the proof matches the submitted parameters/metadata. |
+---
 
-So low reputation does not automatically mean the client cheated. It can mean:
-
-- the client has difficult/skewed data,
-- the local update is less aligned,
-- the client has high local loss,
-- the client is statistically unusual compared with peers,
-- or the system is early in training.
-
-For demos, explain it like this:
-
-```text
-ZKP answers: did the submitted update match its proof statement?
-Reputation answers: was the accepted update useful and consistent?
-Blockchain answers: what was submitted and what did the server decide?
-```
-
-Those are related, but not the same.
-
-## 10. Defense and Aggregation
-
-After proof verification, the server evaluates accepted clients.
-
-Key files:
-
-- `Project_NT114/FL_Server/strategy.py`
-- `Project_NT114/reputation.py`
-- `Project_NT114/FL_Server/defense.py`
-- `Project_NT114/FL_Server/fedadam.py`
-
-The server computes:
-
-| Metric | Meaning |
-|--------|---------|
-| Delta | Relative L2 distance between local and global weights. |
-| Cosine similarity | Directional alignment between local and global weights. |
-| Local accuracy | Client-side training/evaluation signal. |
-| Local loss | Client-side loss signal. |
-| IQR bounds | Statistical outlier range for client deltas. |
-| Reward | Aggregation weight based on reputation and delta. |
-
-Accepted clients produce gradients:
-
-```text
-local_weight - global_weight
-```
-
-The server computes a reputation-weighted gradient average, clips it, then applies FedAdam.
-
-## 11. Demo Cases
-
-The demo controls are client-side. This is intentional: malicious behavior should be controlled by the client pod, not by the server. The server only sends `server_round` so the client can create round-correct proofs.
-
-### Demo A: Faulty Client / Poisoned Update
-
-Goal: client sends corrupted parameters but a valid proof over those corrupted parameters.
-
-Expected outcome:
-
-- ZKP passes.
-- Blockchain verification can still be true.
-- Defense/reputation should notice poor delta/score and reduce influence or penalize the client.
-
-Client-side env vars:
-
-```bash
-DEMO_FAULTY_CLIENTS=2
-DEMO_FAULTY_START_ROUND=2
-DEMO_FAULTY_END_ROUND=4
-DEMO_FAULTY_NOISE_SCALE=0.25
-```
-
-Code path:
-
-- `Project_NT114/FL_Client/Flower.py::_demo_enabled`
-- `Project_NT114/FL_Client/faulty.py::corrupt_parameters`
-
-### Demo B: Invalid ZKP Proof
-
-Goal: client trains normally, then tampers with the proof before submitting.
-
-Expected outcome:
-
-- Server logs `ZKP FAILED for Client X`.
-- Update is excluded from aggregation.
-- Verification failure is recorded on-chain.
-- Client appears in `penalty_clients` history.
-
-Client-side env vars:
-
-```bash
-DEMO_BAD_ZKP_CLIENTS=3
-DEMO_BAD_ZKP_START_ROUND=2
-DEMO_BAD_ZKP_END_ROUND=4
-```
-
-Code path:
-
-- `Project_NT114/FL_Client/Flower.py::_tamper_proof`
-- `Project_NT114/FL_Server/strategy.py::aggregate_fit`
-
-For exact commands, see `deployment/TROUBLESHOOTING.md`.
-
-## 12. Histories, Charts, and Outputs
+## 13. Histories, Charts, and Outputs
 
 The server writes histories to:
 
@@ -441,29 +363,20 @@ The server writes histories to:
 /app/history/server_history_fedadam_non_iid.json
 ```
 
-The server writes plots to:
-
-```text
-/app/picture/log_full/iid/
-/app/picture/log_full/non_iid/
-```
+The history now also includes:
+- `config`: aggregation method, verification mode, staking status
+- `aggregation_method`: per-round aggregation method used
+- `on_chain_verifications`: count of on-chain verifications per round
 
 Generated charts include:
-
-- Training time per client.
-- Local accuracy.
-- Global loss and client loss comparison.
-- Global accuracy and client accuracy comparison.
-- Rejected update rate.
-- Global model performance.
-- Client reputation evolution.
-- Convergence speed.
-
-Relevant code:
-
-- `Project_NT114/fl_server.py`
-- `Project_NT114/plot_results.py`
-- `deployment/scripts/pull-outputs.sh`
+- Training time per client
+- Local accuracy
+- Global loss and client loss comparison
+- Global accuracy and client accuracy comparison
+- Rejected update rate
+- Global model performance
+- Client reputation evolution
+- Convergence speed
 
 Pull results:
 
@@ -471,94 +384,122 @@ Pull results:
 bash deployment/scripts/pull-outputs.sh ./fl-outputs
 ```
 
-## 13. Common Commands
+---
+
+## 14. Common Commands
 
 Check pods:
-
 ```bash
 kubectl get pods -A -o wide
 ```
 
 Watch server logs:
-
 ```bash
 kubectl -n aggregation logs -f deploy/fl-server
 ```
 
 Watch a client:
-
 ```bash
 kubectl -n fl-clients logs -f fl-client-0
 ```
 
 Check ZKP node:
-
 ```bash
 kubectl -n blockchain run zkp-probe --rm -it --image=curlimages/curl --restart=Never -- \
   curl -s http://zkp-node-svc:8090/healthz
 ```
 
-Check geth RPC:
+---
 
+## 15. Example Experiment Configurations
+
+### Baseline (no attacks, no defenses)
 ```bash
-kubectl -n blockchain run rpc-probe --rm -it --image=curlimages/curl --restart=Never -- \
-  curl -s http://geth-svc:8545 -H 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+SPLIT_TYPE=non_iid FL_ROUNDS=40 \
+AGGREGATION_METHOD=reputation \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-Pull outputs:
-
+### Backdoor attack with Multi-Krum defense
 ```bash
-bash deployment/scripts/pull-outputs.sh ./fl-outputs
+SPLIT_TYPE=non_iid FL_ROUNDS=40 \
+AGGREGATION_METHOD=krum NUM_BYZANTINE=2 \
+DEMO_ATTACK_TYPE=backdoor DEMO_ATTACK_CLIENTS=2,3 \
+DEMO_ATTACK_START_ROUND=5 DEMO_ATTACK_END_ROUND=30 \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-## 14. Image and Build Workflow
-
-The system builds four images:
-
-| Image | Dockerfile |
-|-------|------------|
-| `fl-server` | `deployment/docker/Dockerfile.server` |
-| `fl-client` | `deployment/docker/Dockerfile.client` |
-| `fl-blockchain` | `deployment/docker/Dockerfile.blockchain` |
-| `fl-zkp-node` | `deployment/docker/Dockerfile.zkp` |
-
-Docker Hub build script:
-
+### On-chain verification with staking
 ```bash
-bash deployment/scripts/build_and_push_dockerhub.sh <dockerhub-user-or-org> <tag> linux/amd64
+SPLIT_TYPE=non_iid FL_ROUNDS=40 \
+VERIFICATION_MODE=on-chain \
+STAKING_ENABLED=1 \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-GitHub Actions workflow:
-
-```text
-.github/workflows/dockerhub-project-nt114.yml
+### Full security stack
+```bash
+SPLIT_TYPE=non_iid FL_ROUNDS=40 \
+AGGREGATION_METHOD=bulyan NUM_BYZANTINE=1 \
+VERIFICATION_MODE=on-chain \
+STAKING_ENABLED=1 \
+SECURE_AGG_ENABLED=1 \
+TRAINING_VERIFICATION_ENABLED=1 \
+bash deployment/scripts/deploy_using_existing.sh
 ```
 
-It detects changes under `Project_NT114/**`, computes the next `verN` tag, builds images, pushes to Docker Hub, and pushes the Git tag.
+---
 
-## 15. Important Limitations and Honest Notes
+## 16. New File Reference
+
+| File | Purpose |
+|------|---------|
+| `FL_Client/attacks.py` | Advanced attack implementations (backdoor, free-rider, Sybil, collusion, sign-flip). |
+| `FL_Server/aggregators.py` | Byzantine-resilient aggregation (Multi-Krum, Trimmed Mean, Bulyan, RFA). |
+| `contracts/StakingReputation.sol` | Enhanced smart contract with staking, slashing, on-chain ZKP verification, and rewards. |
+| `secure_agg.py` | Additive-masking secure aggregation. |
+| `training_verifier.py` | Training correctness verification via cryptographic commitments. |
+
+Modified files:
+| File | Changes |
+|------|---------|
+| `FL_Server/config.py` | Added all new environment variables and defaults. |
+| `FL_Server/strategy.py` | Integrated on-chain verification, pluggable aggregators, staking rewards, training verification. |
+| `FL_Client/Flower.py` | Integrated advanced attacks, secure aggregation masking, training commitments. |
+| `blockchain.py` | Added on-chain Groth16 verification, staking contract support, reward distribution. |
+| `fl_server.py` | Print active configuration on startup, strategy selection. |
+
+---
+
+## 17. Important Limitations and Honest Notes
 
 | Area | Current state |
 |------|---------------|
-| ZKP | The deployed boundary is ZKP-node based, but the backend is currently Schnorr-style NIZK, not a full training zkSNARK. |
-| Privacy | Raw data is not sent to the server, but model updates can still leak information in real FL threat models. |
-| Blockchain trust | The private PoA chain is useful for auditability inside the experiment, not equivalent to public-chain decentralization. |
-| Reputation | A low reputation can reflect non-IID difficulty, not maliciousness. |
-| IPFS fallback | If IPFS fails, the code can return a local hash CID. Treat repeated fallback CIDs as a deployment issue. |
-| Smart contract reputation | Contract reputation is an integer verification counter; plotted reputation is Python quality scoring. |
+| ZKP | Groth16 zkSNARK proving gradient norm bound. Not a full training correctness circuit. |
+| Privacy | Secure aggregation hides individual updates but masks are deterministic (simulated DH). |
+| Blockchain trust | Private PoA chain — useful for auditability, not equivalent to public-chain decentralization. |
+| Reputation | Low reputation can reflect non-IID difficulty, not maliciousness. |
+| Staking | Works on private PoA chain with test-ETH. Not real financial incentives. |
+| Attacks | Implemented at the parameter level. Real-world attacks may operate at the data or training loop level. |
+| Aggregators | Theoretical guarantees require specific assumptions about the number of Byzantine clients. |
+| Training verification | Hash-based commitments prove training occurred but not correctness of the specific algorithm. |
 
-## 16. Mental Model for Presenting the System
+---
 
-If you need to explain the system cleanly, use this:
+## 18. Mental Model for Presenting the System
 
 ```text
 Federated learning keeps data local.
 IPFS stores model artifacts by content address.
-ZKP checks that an update matches its public proof statement.
-Blockchain records the audit trail.
+ZKP proves the gradient update satisfies a norm bound (Groth16 zkSNARK).
+On-chain verification eliminates server trust for ZKP checks.
+Staking makes attacks financially costly.
 Reputation estimates whether verified updates are useful.
+Byzantine-resilient aggregators (Krum/Bulyan/RFA) resist coordinated poisoning.
+Secure aggregation hides individual updates from the server.
+Training verification detects free-riders who skip training.
 FedAdam combines useful verified updates into the global model.
+Blockchain records the audit trail.
 ```
 
 That separation matters. A client can be:
@@ -567,5 +508,8 @@ That separation matters. A client can be:
 - ZKP-invalid and rejected immediately.
 - Honest but low-reputation because its non-IID data makes its update look unusual.
 - High-performing locally but less useful globally.
+- A free-rider caught by training verification.
+- A backdoor attacker caught by Krum/Bulyan aggregation.
+- A financially-staked attacker whose stake gets slashed after repeated failures.
 
 This is not a bug in the story. It is the point of having multiple layers instead of one giant "trust" switch.

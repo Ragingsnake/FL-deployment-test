@@ -24,6 +24,15 @@ spec:
             - name: CLIENT_ID_RAW
               value: "$(POD_NAME)"
             - { name: SPLIT_TYPE, value: "${SPLIT_TYPE}" }
+            - { name: VERIFICATION_MODE, value: "${VERIFICATION_MODE}" }
+            - { name: STAKING_ENABLED, value: "${STAKING_ENABLED}" }
+            - { name: SECURE_AGG_ENABLED, value: "${SECURE_AGG_ENABLED}" }
+            - { name: TRAINING_VERIFICATION_ENABLED, value: "${TRAINING_VERIFICATION_ENABLED}" }
+            - { name: DEMO_ATTACK_TYPE, value: "${DEMO_ATTACK_TYPE}" }
+            - { name: DEMO_ATTACK_CLIENTS, value: "${DEMO_ATTACK_CLIENTS}" }
+            - { name: DEMO_ATTACK_START_ROUND, value: "${DEMO_ATTACK_START_ROUND}" }
+            - { name: DEMO_ATTACK_END_ROUND, value: "${DEMO_ATTACK_END_ROUND}" }
+            - { name: DEMO_ATTACK_SCALE, value: "${DEMO_ATTACK_SCALE}" }
             - { name: FL_SERVER_HOST, value: "fl-server-svc.aggregation.svc.cluster.local" }
             - { name: FL_SERVER_PORT, value: "8080" }
             - { name: IPFS_API, value: "/dns/ipfs-svc.ipfs.svc.cluster.local/tcp/5001" }
@@ -34,6 +43,12 @@ spec:
                 configMapKeyRef:
                   name: contract-address
                   key: REPUTATION_ADDRESS
+                  optional: true
+            - name: STAKING_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: contract-address
+                  key: STAKING_ADDRESS
                   optional: true
           command: ["sh","-c"]
           args:

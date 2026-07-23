@@ -130,10 +130,13 @@ spec:
               truffle migrate --network kube --reset
               ADDR=$(jq -r '.networks | to_entries[0].value.address' build/contracts/Reputation.json)
               echo "Reputation deployed at $ADDR"
+              STAKING_ADDR=$(jq -r '.networks | to_entries[0].value.address' build/contracts/StakingReputation.json)
+              echo "StakingReputation deployed at $STAKING_ADDR"
               # Write the address into both namespaces that need it.
               for NS in aggregation fl-clients; do
                 kubectl create configmap contract-address \
                   --from-literal=REPUTATION_ADDRESS=$ADDR \
+                  --from-literal=STAKING_ADDRESS=$STAKING_ADDR \
                   -n "$NS" --dry-run=client -o yaml | kubectl apply -f -
               done
           env:
